@@ -11,8 +11,6 @@ pub struct Claims {
     pub sub: String, // user_id
     pub exp: u64,
     pub iat: u64,
-    // pub user_name: String
-    // pub iss: String
 }
 
 pub fn create_token(
@@ -34,7 +32,10 @@ pub fn create_token(
     )
 }
 
-pub fn validate_token(token: &str, secret: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
+pub fn validate_token(
+    token: &str,
+    secret: &str,
+) -> Result<Claims, jsonwebtoken::errors::Error> {
     let claims = jsonwebtoken::decode::<Claims>(
         token,
         &DecodingKey::from_secret(secret.as_ref()),
