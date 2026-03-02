@@ -64,6 +64,23 @@ pub async fn update_user(
     Path(user_id): Path<i64>,
     body: Json<UpdateUser>,
 ) -> Result<Json<User>, ApiError> {
+    if let Some(ref username) = body.username {
+        validate_username(username).map_err(|err| ApiError::BadRequest(err))?;
+    }
+
+    if let Some(ref email) = body.email {
+        validate_email(email).map_err(|err| ApiError::BadRequest(err))?;
+    }
+
+    let user: User = sqlx::query_as("UPDATE users SET username = COALESCE($1, username), email = COALESCE($2, email) where id = $3 RETURNING *")
+        .bind(&body.username)
+        .bind(&body.email)
+        .bind(user_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|err| ApiError::Internal(err.to_string()))?;
+
+    Ok(Json(user))
 }
 
 pub async fn delete_user(
