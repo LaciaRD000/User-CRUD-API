@@ -87,4 +87,15 @@ pub async fn delete_user(
     State(state): State<AppState>,
     Path(user_id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
+    let result = sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(user_id)
+        .execute(&state.db)
+        .await
+        .map_err(|err| ApiError::Internal(err.to_string()))?;
+
+    if result.rows_affected() == 0 {
+        Err(ApiError::NotFound)
+    } else {
+        Ok(StatusCode::NO_CONTENT)
+    }
 }
