@@ -92,7 +92,7 @@ TOKEN_EXPIRY_HOURS=24
 
 ```
 Claims (Serialize, Deserialize)
-├── sub : i64    — ユーザーID (subject)
+├── sub : String — ユーザーID (subject)。RFC 7519 に準拠し文字列型。生成時に i64 → String 変換
 ├── exp : u64    — 有効期限 (UNIX タイムスタンプ、秒)
 └── iat : u64    — 発行時刻 (UNIX タイムスタンプ、秒)
 ```
@@ -101,7 +101,7 @@ Claims (Serialize, Deserialize)
 
 | 関数 | シグネチャ | 説明 |
 |------|-----------|------|
-| `create_token` | `pub fn create_token(user_id: i64, secret: &str, expiry_hours: i64) -> Result<String, jsonwebtoken::errors::Error>` | Claims を組み立て → `jsonwebtoken::encode` で HS256 署名付きトークンを生成して返す |
+| `create_token` | `pub fn create_token(user_id: i64, secret: &str, expiry_hours: i64) -> Result<String, jsonwebtoken::errors::Error>` | `user_id.to_string()` で sub を生成 → Claims を組み立て → `jsonwebtoken::encode` で HS256 署名付きトークンを生成して返す |
 | `validate_token` | `pub fn validate_token(token: &str, secret: &str) -> Result<Claims, jsonwebtoken::errors::Error>` | `jsonwebtoken::decode` でトークンを検証・デコードして Claims を返す。期限切れ・署名不正はエラー |
 
 **トレイト実装**:
@@ -115,7 +115,8 @@ Claims (Serialize, Deserialize)
 2. `"Bearer "` プレフィックスを除去してトークン文字列を取り出す
 3. `parts.state` (= `&AppState`) から `jwt_secret` を取得
 4. `validate_token(token, secret)` を呼ぶ
-5. 成功 → `Ok(claims)`、失敗 → `Err(ApiError::Unauthorized)`
+5. 成功 → `Ok(claims)`
+6. 失敗 → `tracing::warn!` でエラー種別をサーバーログに記録 → クライアントには一律 `Err(ApiError::Unauthorized)` を返す
 
 > **ポイント**: `FromRequestParts` はリクエストボディを消費しない Extractor。`FromRequest` だとボディを消費してしまい、後続の `Json<T>` Extractor と競合するため、`FromRequestParts` を使う。
 
@@ -247,7 +248,7 @@ ApiError
 |------|-----------|------|
 | `validate_username` | `pub fn validate_username(username: &str) -> Result<(), String>` | 空チェック、文字数制限(1〜32文字)。失敗時はエラーメッセージを返す |
 | `validate_email` | `pub fn validate_email(email: &str) -> Result<(), String>` | 空チェック、`@` を含むかの簡易形式チェック。失敗時はエラーメッセージを返す |
-| `validate_password` | `pub fn validate_password(password: &str) -> Result<(), String>` | 空チェック、8文字以上。失敗時はエラーメッセージを返す |
+| `validate_password` | `pub fn validate_password(password: &str) -> Result<(), String>` | 空チェック、8文字以上、72バイト以下（bcrypt の入力上限）。失敗時はエラーメッセージを返す |
 
 `routes/users.rs` の `create_user` / `update_user` および `routes/auth.rs` の `register` から呼び出す。
 
