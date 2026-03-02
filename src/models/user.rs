@@ -9,13 +9,36 @@ pub struct User {
 }
 
 #[derive(Deserialize)]
-pub struct CreateUser {
-    pub username: String,
-    pub email: String,
-}
-
-#[derive(Deserialize)]
 pub struct UpdateUser {
     pub username: Option<String>,
     pub email: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct RegisterUser {
+    pub username: String,
+    pub email: String,
+    pub password: String,
+}
+
+#[derive(Deserialize)]
+pub struct LoginUser {
+    pub email: String,
+    pub password: String,
+}
+
+#[derive(Serialize)]
+pub struct AuthResponse {
+    pub access_token: String,
+    pub refresh_token: String,
+}
+
+#[derive(Deserialize)]
+pub struct RefreshRequest {
+    pub refresh_token: String,
+}
+
+#[derive(Deserialize)]
+pub struct LogoutRequest {
+    pub refresh_token: String,
 }
