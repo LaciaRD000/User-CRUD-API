@@ -1,10 +1,11 @@
 use std::time::Duration;
 
-use crate::{errors::ApiError, state::AppState};
 use axum::extract::FromRequestParts;
 use chrono::{DateTime, Local};
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
+
+use crate::{errors::ApiError, state::AppState};
 
 #[derive(Serialize, Deserialize)]
 pub struct Claims {

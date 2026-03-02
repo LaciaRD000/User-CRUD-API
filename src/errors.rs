@@ -17,14 +17,20 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         match self {
             ApiError::NotFound => {
-                (StatusCode::NOT_FOUND, Json(json!({"error": "NotFound"}))).into_response()
+                (StatusCode::NOT_FOUND, Json(json!({"error": "NotFound"})))
+                    .into_response()
             }
             ApiError::Internal(s) => {
                 tracing::error!("Internal error: {s}");
-                (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "内部エラーが発生しました"}))).into_response()
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "An internal error occurred"})),
+                )
+                    .into_response()
             }
             ApiError::BadRequest(s) => {
-                (StatusCode::BAD_REQUEST, Json(json!({"error": s}))).into_response()
+                (StatusCode::BAD_REQUEST, Json(json!({"error": s})))
+                    .into_response()
             }
             ApiError::Unauthorized => (
                 StatusCode::UNAUTHORIZED,
@@ -32,7 +38,8 @@ impl IntoResponse for ApiError {
             )
                 .into_response(),
             ApiError::Forbidden => {
-                (StatusCode::FORBIDDEN, Json(json!({"error": "Forbidden"}))).into_response()
+                (StatusCode::FORBIDDEN, Json(json!({"error": "Forbidden"})))
+                    .into_response()
             }
         }
     }

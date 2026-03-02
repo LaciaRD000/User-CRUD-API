@@ -17,7 +17,9 @@ use tower_http::{
     cors::{Any, CorsLayer},
     trace::TraceLayer,
 };
-use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{
+    EnvFilter, layer::SubscriberExt, util::SubscriberInitExt,
+};
 
 use crate::{routes::users, state::AppState};
 
@@ -27,12 +29,14 @@ async fn main() {
 
     tracing_subscriber::registry()
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-            format!("{}=debug,tower_http=debug", env!("CARGO_CRATE_NAME")).into()
+            format!("{}=debug,tower_http=debug", env!("CARGO_CRATE_NAME"))
+                .into()
         }))
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let database_url =
+        std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let pool = db::create_pool(&database_url)
         .await
         .expect("Failed to connect to database");
@@ -58,7 +62,11 @@ async fn main() {
         .layer(cors)
         .layer(TraceLayer::new_for_http());
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
+        .await
+        .expect("ポートのバインドに失敗しました");
 
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app)
+        .await
+        .expect("サーバーの起動に失敗しました");
 }

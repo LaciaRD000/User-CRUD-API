@@ -1,7 +1,8 @@
-use crate::snowflake::SnowflakeGenerator;
+use std::sync::{Arc, Mutex};
+
 use sqlx::PgPool;
-use std::sync::Arc;
-use std::sync::Mutex;
+
+use crate::snowflake::SnowflakeGenerator;
 
 #[derive(Clone)]
 pub struct AppState {

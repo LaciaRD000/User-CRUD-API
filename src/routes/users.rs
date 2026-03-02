@@ -8,15 +8,15 @@ use crate::{
     errors::ApiError,
     models::{CreateUser, UpdateUser, User},
     state::AppState,
+    validation::{validate_email, validate_username},
 };
-
-use crate::validation::{validate_email, validate_username};
 
 pub async fn create_user(
     State(state): State<AppState>,
     body: Json<CreateUser>,
 ) -> Result<(StatusCode, Json<User>), ApiError> {
-    validate_username(&body.username).map_err(|err| ApiError::BadRequest(err))?;
+    validate_username(&body.username)
+        .map_err(|err| ApiError::BadRequest(err))?;
     validate_email(&body.email).map_err(|err| ApiError::BadRequest(err))?;
 
     let snowflake = state.snowflake.lock().unwrap().generate();
@@ -34,7 +34,9 @@ pub async fn create_user(
     Ok((StatusCode::CREATED, Json(user)))
 }
 
-pub async fn list_users(State(state): State<AppState>) -> Result<Json<Vec<User>>, ApiError> {
+pub async fn list_users(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<User>>, ApiError> {
     let users: Vec<User> = sqlx::query_as("SELECT * FROM users ORDER BY id")
         .fetch_all(&state.db)
         .await
@@ -46,11 +48,12 @@ pub async fn get_user(
     State(state): State<AppState>,
     Path(user_id): Path<i64>,
 ) -> Result<Json<User>, ApiError> {
-    let user: Option<User> = sqlx::query_as("SELECT * FROM users WHERE id = $1")
-        .bind(user_id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|err| ApiError::Internal(err.to_string()))?;
+    let user: Option<User> =
+        sqlx::query_as("SELECT * FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|err| ApiError::Internal(err.to_string()))?;
 
     match user {
         Some(user) => Ok(Json(user)),
