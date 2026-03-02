@@ -1,3 +1,4 @@
+mod auth;
 mod db;
 mod errors;
 mod models;
@@ -25,10 +26,9 @@ async fn main() {
     let _ = dotenv().expect(".env file not found");
 
     tracing_subscriber::registry()
-        .with(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| format!("{}=debug,tower_http=debug", env!("CARGO_CRATE_NAME")).into()),
-        )
+        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+            format!("{}=debug,tower_http=debug", env!("CARGO_CRATE_NAME")).into()
+        }))
         .with(tracing_subscriber::fmt::layer())
         .init();
 

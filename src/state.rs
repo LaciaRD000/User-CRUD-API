@@ -7,13 +7,15 @@ use std::sync::Mutex;
 pub struct AppState {
     pub db: PgPool,
     pub snowflake: Arc<Mutex<SnowflakeGenerator>>,
+    pub jwt_secret: String,
 }
 
 impl AppState {
-    pub fn new(pool: PgPool, machine_id: u16) -> Self {
+    pub fn new(pool: PgPool, machine_id: u16, jwt_secret: String) -> Self {
         Self {
             db: pool,
             snowflake: Arc::new(Mutex::new(SnowflakeGenerator::new(machine_id))),
+            jwt_secret,
         }
     }
 }

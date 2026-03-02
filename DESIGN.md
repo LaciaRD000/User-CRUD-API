@@ -103,7 +103,7 @@ Claims (Serialize, Deserialize)
 
 | 関数 | シグネチャ | 説明 |
 |------|-----------|------|
-| `create_token` | `pub fn create_token(user_id: i64, secret: &str, expiry_minutes: i64) -> Result<String, jsonwebtoken::errors::Error>` | `user_id.to_string()` で sub を生成 → Claims を組み立て → `jsonwebtoken::encode` で HS256 署名付きトークンを生成して返す |
+| `create_token` | `pub fn create_token(user_id: i64, secret: &str, expiry_minutes: u64) -> Result<String, jsonwebtoken::errors::Error>` | `user_id.to_string()` で sub を生成 → Claims を組み立て → `jsonwebtoken::encode` で HS256 署名付きトークンを生成して返す |
 | `validate_token` | `pub fn validate_token(token: &str, secret: &str) -> Result<Claims, jsonwebtoken::errors::Error>` | `jsonwebtoken::decode` でトークンを検証・デコードして Claims を返す。期限切れ・署名不正はエラー |
 
 **トレイト実装**:
