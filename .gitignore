@@ -1,3 +1,5 @@
 /target
 .env
 rustfmt.toml
+.git
+.claude
