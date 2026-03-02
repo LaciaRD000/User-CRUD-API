@@ -9,6 +9,8 @@ pub enum ApiError {
     NotFound,
     BadRequest(String),
     Internal(String),
+    Unauthorized,
+    Forbidden,
 }
 
 impl IntoResponse for ApiError {
@@ -22,6 +24,14 @@ impl IntoResponse for ApiError {
             }
             ApiError::BadRequest(s) => {
                 (StatusCode::BAD_REQUEST, Json(json!({"error": s}))).into_response()
+            }
+            ApiError::Unauthorized => (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "Unauthorized"})),
+            )
+                .into_response(),
+            ApiError::Forbidden => {
+                (StatusCode::FORBIDDEN, Json(json!({"error": "Forbidden"}))).into_response()
             }
         }
     }
