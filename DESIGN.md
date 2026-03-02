@@ -359,7 +359,7 @@ pub use user::{AuthResponse, LoginUser, LogoutRequest, RefreshRequest, RegisterU
 4. `INSERT INTO users (id, username, email, password_hash) VALUES ($1, $2, $3, $4)` で DB に保存（`RETURNING` 不要 — レスポンスはトークンのみで、ID は生成済みの変数を使う）
 5. `create_token(id, &state.jwt_secret, expiry_minutes)` でアクセストークン発行
 6. `uuid::Uuid::new_v4().to_string()` でリフレッシュトークン生成
-7. Snowflake ID で `refresh_tokens` テーブルに INSERT（user_id, token, expires_at）
+7. `INSERT INTO refresh_tokens (id, user_id, token, expires_at) VALUES ($1, $2, $3, $4)` で DB に保存（id は Snowflake ID を新たに生成）
 8. `(StatusCode::CREATED, Json(AuthResponse { access_token, refresh_token }))` を返す
 
 **`login` の処理フロー**:
@@ -369,7 +369,7 @@ pub use user::{AuthResponse, LoginUser, LogoutRequest, RefreshRequest, RegisterU
 4. 不一致なら `ApiError::Unauthorized`
 5. `create_token(user.id, &state.jwt_secret, expiry_minutes)` でアクセストークン発行
 6. `uuid::Uuid::new_v4().to_string()` でリフレッシュトークン生成
-7. Snowflake ID で `refresh_tokens` テーブルに INSERT（user_id, token, expires_at）
+7. `INSERT INTO refresh_tokens (id, user_id, token, expires_at) VALUES ($1, $2, $3, $4)` で DB に保存（id は Snowflake ID を新たに生成）
 8. `Json(AuthResponse { access_token, refresh_token })` を返す
 
 **`refresh` の処理フロー**:
@@ -379,7 +379,7 @@ pub use user::{AuthResponse, LoginUser, LogoutRequest, RefreshRequest, RegisterU
 4. 古いリフレッシュトークンを DELETE（ローテーション）
 5. `create_token(user_id, &state.jwt_secret, expiry_minutes)` で新しいアクセストークン発行
 6. `uuid::Uuid::new_v4().to_string()` で新しいリフレッシュトークン生成
-7. Snowflake ID で `refresh_tokens` テーブルに INSERT
+7. `INSERT INTO refresh_tokens (id, user_id, token, expires_at) VALUES ($1, $2, $3, $4)` で DB に保存（id は Snowflake ID を新たに生成）
 8. `Json(AuthResponse { access_token, refresh_token })` を返す
 
 **`logout` の処理フロー**:
@@ -433,7 +433,7 @@ pub mod users;
 | `tokio` | 1 (features: full) | 非同期ランタイム (async/await の実行基盤) |
 | `serde` | 1.0 (features: derive) | 構造体の Serialize/Deserialize を derive マクロで自動実装 |
 | `serde_json` | 1 | JSON の生成 (エラーレスポンス用の `json!` マクロ) |
-| `sqlx` | 0.8 (features: runtime-tokio, postgres) | PostgreSQL 非同期クライアント (コンパイル時クエリチェック対応) |
+| `sqlx` | 0.8 (features: runtime-tokio, postgres, chrono) | PostgreSQL 非同期クライアント (コンパイル時クエリチェック対応)。`chrono` feature で `DateTime<Utc>` ↔ `TIMESTAMPTZ` の変換に対応 |
 | `dotenvy` | 0.15 | `.env` ファイルから環境変数を読み込む |
 | `tower-http` | 0.6 (features: cors, trace) | CORS ミドルウェアとリクエストトレース |
 | `tracing` | 0.1 | 構造化ログ出力の API (`info!`, `warn!`, `error!` マクロ) |
@@ -464,7 +464,7 @@ pub mod users;
 ### Phase 2: JWT 認証 + 認可 + リフレッシュトークン
 
 12. **Supabase** — `ALTER TABLE users ADD COLUMN password_hash TEXT NOT NULL DEFAULT '';` + `CREATE TABLE refresh_tokens (...)`
-13. **`Cargo.toml`** — `jsonwebtoken`, `bcrypt`, `chrono`, `uuid` を追加
+13. **`Cargo.toml`** — `jsonwebtoken`, `bcrypt`, `chrono`, `uuid` を追加。`sqlx` の features に `chrono` を追加
 14. **`.env`** — `JWT_SECRET`, `ACCESS_TOKEN_EXPIRY_MINUTES`, `REFRESH_TOKEN_EXPIRY_DAYS` を追加
 15. **`models/user.rs`** — `password_hash` に `#[sqlx(default)]` 追加、`RegisterUser`, `LoginUser`, `AuthResponse`（`access_token` + `refresh_token`）, `RefreshRequest`, `LogoutRequest` 追加、`CreateUser` 削除
 16. **`models/mod.rs`** — 再エクスポート更新（`CreateUser` 削除、`RefreshRequest`, `LogoutRequest` 追加）
