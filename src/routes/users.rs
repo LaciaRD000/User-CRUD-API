@@ -3,6 +3,7 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
+use sqlx::Row;
 
 use crate::{
     errors::ApiError,
@@ -46,6 +47,16 @@ pub async fn get_user(
     State(state): State<AppState>,
     Path(user_id): Path<i64>,
 ) -> Result<Json<User>, ApiError> {
+    let user: Option<User> = sqlx::query_as("SELECT * FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|err| ApiError::Internal(err.to_string()))?;
+
+    match user {
+        Some(user) => Ok(Json(user)),
+        None => Err(ApiError::NotFound),
+    }
 }
 
 pub async fn update_user(
