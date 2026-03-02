@@ -6,6 +6,10 @@ pub struct User {
     pub id: i64,
     pub username: String,
     pub email: String,
+
+    #[serde(skip_serializing)]
+    #[sqlx(default)]
+    pub password_hash: String,
 }
 
 #[derive(Deserialize)]
