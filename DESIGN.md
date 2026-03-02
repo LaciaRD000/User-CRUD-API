@@ -168,25 +168,28 @@ CREATE TABLE refresh_tokens (
 
 ### `state.rs` — アプリケーション共有状態
 
-**役割**: DB接続プール、Snowflake 生成器、JWT シークレットを全ハンドラーで共有する
+**役割**: DB接続プール、Snowflake 生成器、JWT シークレット、トークン有効期限を全ハンドラーで共有する
 
 **構造体**:
 
 ```
 AppState (Clone)
-├── db         : PgPool                          — DB 接続プール
-├── snowflake  : Arc<Mutex<SnowflakeGenerator>>  — ID 生成器
-└── jwt_secret : String                          — JWT 署名用シークレット
+├── db                          : PgPool                          — DB 接続プール
+├── snowflake                   : Arc<Mutex<SnowflakeGenerator>>  — ID 生成器
+├── jwt_secret                  : String                          — JWT 署名用シークレット
+├── access_token_expiry_minutes : u64                             — アクセストークン有効期限（分）
+└── refresh_token_expiry_days   : u64                             — リフレッシュトークン有効期限（日）
 ```
 
 - `PgPool` — 内部で `Arc` を持っているので `Clone` するだけで共有できる
 - `Arc<Mutex<...>>` — SnowflakeGenerator は内部状態を変更するためロックが必要
+- トークン有効期限は起動時に `.env` から1回だけ読み取り、ハンドラーでは `state` 経由で参照する
 
 **関数**:
 
 | 関数 | シグネチャ | 説明 |
 |------|-----------|------|
-| `AppState::new` | `pub fn new(pool: PgPool, machine_id: u16, jwt_secret: String) -> Self` | DB プール、SnowflakeGenerator、JWT シークレットを受け取って初期化する |
+| `AppState::new` | `pub fn new(pool: PgPool, machine_id: u16, jwt_secret: String, access_token_expiry_minutes: u64, refresh_token_expiry_days: u64) -> Self` | DB プール、SnowflakeGenerator、JWT シークレット、トークン有効期限を受け取って初期化する |
 
 ---
 
@@ -353,8 +356,8 @@ pub use user::{AuthResponse, LoginUser, LogoutRequest, RefreshRequest, RegisterU
 1. `validate_username`, `validate_email`, `validate_password` でバリデーション
 2. `bcrypt::hash(&body.password, DEFAULT_COST)` でパスワードをハッシュ化
 3. `state.snowflake.lock().unwrap().generate()` で Snowflake ID 生成
-4. `INSERT INTO users (id, username, email, password_hash) VALUES ($1, $2, $3, $4) RETURNING id, username, email` で DB に保存
-5. `create_token(user.id, &state.jwt_secret, expiry_minutes)` でアクセストークン発行
+4. `INSERT INTO users (id, username, email, password_hash) VALUES ($1, $2, $3, $4)` で DB に保存（`RETURNING` 不要 — レスポンスはトークンのみで、ID は生成済みの変数を使う）
+5. `create_token(id, &state.jwt_secret, expiry_minutes)` でアクセストークン発行
 6. `uuid::Uuid::new_v4().to_string()` でリフレッシュトークン生成
 7. Snowflake ID で `refresh_tokens` テーブルに INSERT（user_id, token, expires_at）
 8. `(StatusCode::CREATED, Json(AuthResponse { access_token, refresh_token }))` を返す
@@ -467,7 +470,7 @@ pub mod users;
 16. **`models/mod.rs`** — 再エクスポート更新（`CreateUser` 削除、`RefreshRequest`, `LogoutRequest` 追加）
 17. **`errors.rs`** — `Unauthorized` + `Forbidden` バリアント追加
 18. **`validation.rs`** — `validate_password` 追加
-19. **`state.rs`** — `jwt_secret` フィールド追加、`new()` シグネチャ変更
+19. **`state.rs`** — `jwt_secret`, `access_token_expiry_minutes`, `refresh_token_expiry_days` フィールド追加、`new()` シグネチャ変更
 20. **`auth.rs`** — `Claims`, `create_token`（`expiry_minutes`）, `validate_token`, `FromRequestParts` 実装
 21. **`routes/auth.rs`** — `register`, `login`, `refresh`, `logout` ハンドラー実装
 22. **`routes/mod.rs`** — `pub mod auth;` 追加

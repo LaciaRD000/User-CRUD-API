@@ -20,7 +20,8 @@ impl IntoResponse for ApiError {
                 (StatusCode::NOT_FOUND, Json(json!({"error": "NotFound"}))).into_response()
             }
             ApiError::Internal(s) => {
-                (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": s}))).into_response()
+                tracing::error!("Internal error: {s}");
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "内部エラーが発生しました"}))).into_response()
             }
             ApiError::BadRequest(s) => {
                 (StatusCode::BAD_REQUEST, Json(json!({"error": s}))).into_response()
