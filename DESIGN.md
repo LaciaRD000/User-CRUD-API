@@ -75,7 +75,7 @@ DATABASE_URL=postgresql://postgres:<password>@<host>:5432/postgres
 
 | 関数 | シグネチャ | 説明 |
 |------|-----------|------|
-| `create_pool` | `pub async fn create_pool() -> Result<PgPool, sqlx::Error>` | `DATABASE_URL` 環境変数から接続文字列を取得し、`PgPoolOptions` で最大接続数 5 を指定して `PgPool` を作成して返す。接続失敗時はエラーを返す |
+| `create_pool` | `pub async fn create_pool(database_url: &str) -> Result<PgPool, sqlx::Error>` | 接続文字列を引数で受け取り、`PgPoolOptions` で最大接続数 5 を指定して `PgPool` を作成して返す。接続失敗時はエラーを返す |
 
 **テーブル定義** (Supabase の SQL Editor で実行):
 
