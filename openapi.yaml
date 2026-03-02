@@ -1,0 +1,359 @@
+openapi: 3.0.3
+info:
+  title: user-api
+  description: Rust製のユーザー管理 REST API
+  version: 0.1.0
+
+servers:
+  - url: http://localhost:3000
+    description: ローカル開発サーバー
+
+paths:
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: ユーザー登録
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterUser"
+      responses:
+        "201":
+          description: 登録成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: バリデーションエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                username_empty:
+                  value: { "error": "username is empty" }
+                username_too_long:
+                  value: { "error": "username is too long" }
+                email_empty:
+                  value: { "error": "email is empty" }
+                email_invalid:
+                  value: { "error": "email is invalid" }
+                password_empty:
+                  value: { "error": "password is empty" }
+                password_too_short:
+                  value: { "error": "password is too short" }
+                password_too_long:
+                  value: { "error": "password is too long" }
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: ログイン
+      description: メールアドレスとパスワードで認証し、トークンを発行する。失敗時はメール不存在・パスワード不一致を区別せず一律 401 を返す。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginUser"
+      responses:
+        "200":
+          description: ログイン成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: トークンリフレッシュ
+      description: リフレッシュトークンを使って新しいアクセストークンとリフレッシュトークンを発行する。使用済みのリフレッシュトークンは無効化される（ローテーション）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "200":
+          description: リフレッシュ成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: ログアウト
+      description: リフレッシュトークンを無効化する。アクセストークンによる認証が必要。
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LogoutRequest"
+      responses:
+        "204":
+          description: ログアウト成功
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /users:
+    get:
+      tags: [Users]
+      summary: ユーザー一覧取得
+      responses:
+        "200":
+          description: ユーザー一覧
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /users/{id}:
+    get:
+      tags: [Users]
+      summary: ユーザー詳細取得
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: ユーザー詳細
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    put:
+      tags: [Users]
+      summary: ユーザー更新
+      description: 認証済みユーザーが自分自身の情報を更新する。他人のリソースへのアクセスは 403 を返す。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUser"
+      responses:
+        "200":
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: バリデーションエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      tags: [Users]
+      summary: ユーザー削除
+      description: 認証済みユーザーが自分自身を削除する。他人のリソースへのアクセスは 403 を返す。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "204":
+          description: 削除成功
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "JWT アクセストークン。Claims: sub (user_id), exp, iat"
+
+  parameters:
+    UserId:
+      name: id
+      in: path
+      required: true
+      description: ユーザー ID (Snowflake ID)
+      schema:
+        type: integer
+        format: int64
+
+  schemas:
+    RegisterUser:
+      type: object
+      required: [username, email, password]
+      properties:
+        username:
+          type: string
+          minLength: 1
+          maxLength: 32
+          example: taro
+        email:
+          type: string
+          format: email
+          example: taro@example.com
+        password:
+          type: string
+          minLength: 8
+          maxLength: 72
+          example: password123
+
+    LoginUser:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: taro@example.com
+        password:
+          type: string
+          example: password123
+
+    AuthResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          description: JWT アクセストークン (HS256)
+          example: eyJhbGciOiJIUzI1NiJ9...
+        refresh_token:
+          type: string
+          description: UUID v4 リフレッシュトークン
+          example: 550e8400-e29b-41d4-a716-446655440000
+
+    RefreshRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          type: string
+          example: 550e8400-e29b-41d4-a716-446655440000
+
+    LogoutRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          type: string
+          example: 550e8400-e29b-41d4-a716-446655440000
+
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: Snowflake ID
+          example: 123456789012345
+        username:
+          type: string
+          example: taro
+        email:
+          type: string
+          format: email
+          example: taro@example.com
+
+    UpdateUser:
+      type: object
+      properties:
+        username:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 32
+          example: taro_updated
+        email:
+          type: string
+          nullable: true
+          format: email
+          example: taro_updated@example.com
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          example: username is empty
+
+  responses:
+    Unauthorized:
+      description: 認証失敗
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: Unauthorized
+
+    Forbidden:
+      description: 認可失敗（他人のリソースへのアクセス）
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: Forbidden
+
+    NotFound:
+      description: リソースが見つからない
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: NotFound
+
+    InternalServerError:
+      description: サーバー内部エラー
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: An internal error occurred
