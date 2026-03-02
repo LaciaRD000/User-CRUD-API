@@ -3,7 +3,6 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
-use sqlx::Row;
 
 use crate::{
     errors::ApiError,

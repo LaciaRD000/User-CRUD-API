@@ -9,13 +9,14 @@ mod validation;
 use axum::{
     Router,
     http::Method,
-    routing::{delete, get, post, put},
+    routing::{get, post},
 };
 use dotenvy::dotenv;
 use tower_http::{
     cors::{Any, CorsLayer},
     trace::TraceLayer,
 };
+use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::{routes::users, state::AppState};
 
@@ -23,7 +24,13 @@ use crate::{routes::users, state::AppState};
 async fn main() {
     let _ = dotenv().expect(".env file not found");
 
-    tracing_subscriber::fmt().init();
+    tracing_subscriber::registry()
+        .with(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| format!("{}=debug,tower_http=debug", env!("CARGO_CRATE_NAME")).into()),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .init();
 
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let pool = db::create_pool(&database_url)
