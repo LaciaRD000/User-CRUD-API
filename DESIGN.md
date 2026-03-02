@@ -120,6 +120,8 @@ Claims (Serialize, Deserialize)
 
 > **ポイント**: `FromRequestParts` はリクエストボディを消費しない Extractor。`FromRequest` だとボディを消費してしまい、後続の `Json<T>` Extractor と競合するため、`FromRequestParts` を使う。
 
+> **Axum 0.8 の注意**: `#[async_trait]` マクロは不要。Axum 0.8 では RPITIT (return-position impl trait in traits) により、`impl FromRequestParts` で直接 `async fn` が書ける。
+
 ---
 
 ### `db.rs` — データベース接続
@@ -391,8 +393,8 @@ pub mod users;
 | `tower-http` | 0.6 (features: cors, trace) | CORS ミドルウェアとリクエストトレース |
 | `tracing` | 0.1 | 構造化ログ出力の API (`info!`, `warn!`, `error!` マクロ) |
 | `tracing-subscriber` | 0.3 (features: env-filter) | tracing のログをターミナルに表示するフォーマッター。`EnvFilter` で `RUST_LOG` 環境変数によるログレベル制御に対応 |
-| `jsonwebtoken` | 9 | JWT トークンの生成 (`encode`) と検証 (`decode`) |
-| `bcrypt` | 0.17 | パスワードのハッシュ化 (`hash`) と照合 (`verify`) |
+| `jsonwebtoken` | 10 (features: aws_lc_rs) | JWT トークンの生成 (`encode`) と検証 (`decode`)。v10 では暗号バックエンドの feature 指定が必須 |
+| `bcrypt` | 0.18 | パスワードのハッシュ化 (`hash`) と照合 (`verify`) |
 | `chrono` | 0.4 (features: serde) | トークン有効期限の計算 (`Utc::now()` + Duration) |
 
 ---
