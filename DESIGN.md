@@ -49,7 +49,7 @@ DATABASE_URL=postgresql://postgres:<password>@<host>:5432/postgres
 
 | 関数 | シグネチャ | 説明 |
 |------|-----------|------|
-| `main` | `#[tokio::main] async fn main()` | .env 読み込み → tracing 初期化 → DB接続プール作成 → AppState 生成 → CORS・トレースレイヤー設定 → Router にルート登録 → `0.0.0.0:3000` で起動 |
+| `main` | `#[tokio::main] async fn main()` | .env 読み込み → `tracing_subscriber::registry()` + `EnvFilter` + `fmt::layer()` で tracing 初期化 → DB接続プール作成 → AppState 生成 → CORS・トレースレイヤー設定 → Router にルート登録 → `0.0.0.0:3000` で起動 |
 
 **ルート定義**:
 
@@ -266,7 +266,7 @@ pub mod users;
 | `dotenvy` | 0.15 | `.env` ファイルから環境変数を読み込む |
 | `tower-http` | 0.6 (features: cors, trace) | CORS ミドルウェアとリクエストトレース |
 | `tracing` | 0.1 | 構造化ログ出力の API (`info!`, `warn!`, `error!` マクロ) |
-| `tracing-subscriber` | 0.3 | tracing のログをターミナルに表示するフォーマッター |
+| `tracing-subscriber` | 0.3 (features: env-filter) | tracing のログをターミナルに表示するフォーマッター。`EnvFilter` で `RUST_LOG` 環境変数によるログレベル制御に対応 |
 
 ---
 
