@@ -13,7 +13,10 @@ Rust 製のユーザー管理 REST API。Axum + Tokio で構築し、Supabase (P
 | bcrypt 0.18 | パスワードハッシュ |
 | chrono 0.4 | 日時操作 |
 | uuid 1 | リフレッシュトークン生成 |
-| tower-http 0.6 | CORS, トレースミドルウェア |
+| tower 0.5 | ミドルウェア合成 (ServiceBuilder) |
+| tower-http 0.6 | CORS, トレース, gzip 圧縮, タイムアウト, パス正規化 |
+| tower_governor 0.8 | IP ベースレートリミット |
+| tower-helmet 0.3 | セキュリティヘッダー (HSTS 等) |
 | Snowflake ID | ユニーク ID 生成 (自前実装) |
 
 ## セットアップ
@@ -39,6 +42,7 @@ DATABASE_URL=postgresql://postgres:<password>@<host>:5432/postgres
 JWT_SECRET=32文字以上のランダム文字列
 ACCESS_TOKEN_EXPIRY_MINUTES=60
 REFRESH_TOKEN_EXPIRY_DAYS=7
+RUST_LOG=info
 ```
 
 3. ビルド・起動

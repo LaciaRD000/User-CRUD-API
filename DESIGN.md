@@ -76,6 +76,11 @@ REFRESH_TOKEN_EXPIRY_DAYS=7
 - `GovernorLayer` — IP ベースのレートリミット。ルートグループごとに異なる設定を適用する。超過時は `429 Too Many Requests` を返す
 - `TraceLayer` — 全リクエスト/レスポンスを自動ログ出力
 - `CorsLayer` — 全オリジン許可、GET/POST/PUT/DELETE メソッド許可、`Authorization` / `Content-Type` ヘッダー許可
+- `CompressionLayer` — レスポンスの gzip 圧縮
+- `DefaultBodyLimit` — リクエストボディのサイズ上限 (5MB)
+- `TimeoutLayer` — リクエスト処理のタイムアウト (10秒、超過時は 408 Request Timeout)
+- `HelmetLayer` — セキュリティヘッダー一括設定 (HSTS, X-Content-Type-Options 等)
+- `NormalizePathLayer` — 末尾スラッシュの正規化 (`/users/` → `/users`)。Router の外側からラップする必要がある
 
 **レートリミット設定**:
 
@@ -106,21 +111,35 @@ let auth_routes = Router::new()
     .route("/auth/login", post(...))
     .route("/auth/refresh", post(...))
     .route("/auth/logout", post(...))
-    .layer(GovernorLayer::new(&auth_governor));
+    .layer(GovernorLayer::new(auth_governor));
 
 // ユーザールート（緩いレートリミット）
 let user_routes = Router::new()
     .route("/users", get(...))
     .route("/users/{id}", get(...).put(...).delete(...))
-    .layer(GovernorLayer::new(&user_governor));
+    .layer(GovernorLayer::new(user_governor));
 
-// 合流
+// 合流 + ミドルウェア
 let app = Router::new()
     .merge(auth_routes)
     .merge(user_routes)
     .with_state(state)
-    .layer(cors)
-    .layer(TraceLayer::new_for_http());
+    .layer(
+        ServiceBuilder::new()
+            .layer(TraceLayer::new_for_http())
+            .layer(cors)
+            .layer(CompressionLayer::new())
+            .layer(DefaultBodyLimit::max(5 * 1024 * 1024))
+            .layer(TimeoutLayer::with_status_code(
+                StatusCode::REQUEST_TIMEOUT,
+                Duration::from_secs(10),
+            ))
+            .layer(HelmetLayer::with_defaults()),
+    );
+
+// NormalizePathLayer は Router の外側からラップ
+let app: NormalizePath<Router> =
+    NormalizePathLayer::trim_trailing_slash().layer(app);
 ```
 
 > **ポイント**: `GovernorLayer` は IP アドレスでクライアントを識別する。IP を取得するために、`axum::serve` の引数を `app.into_make_service_with_connect_info::<SocketAddr>()` に変更する必要がある
@@ -517,7 +536,9 @@ pub mod users;
 | `serde_json` | 1 | JSON の生成 (エラーレスポンス用の `json!` マクロ) |
 | `sqlx` | 0.8 (features: runtime-tokio, postgres, chrono) | PostgreSQL 非同期クライアント (コンパイル時クエリチェック対応)。`chrono` feature で `DateTime<Utc>` ↔ `TIMESTAMPTZ` の変換に対応 |
 | `dotenvy` | 0.15 | `.env` ファイルから環境変数を読み込む |
-| `tower-http` | 0.6 (features: cors, trace) | CORS ミドルウェアとリクエストトレース |
+| `tower` | 0.5 | `ServiceBuilder` によるミドルウェア合成、`Layer` トレイト |
+| `tower-http` | 0.6 (features: cors, trace, compression-gzip, timeout, normalize-path) | CORS、トレース、gzip 圧縮、タイムアウト、パス正規化 |
+| `tower-helmet` | 0.3 | セキュリティヘッダー一括設定 (`HelmetLayer`) |
 | `tracing` | 0.1 | 構造化ログ出力の API (`info!`, `warn!`, `error!` マクロ) |
 | `tracing-subscriber` | 0.3 (features: env-filter) | tracing のログをターミナルに表示するフォーマッター。`EnvFilter` で `RUST_LOG` 環境変数によるログレベル制御に対応 |
 | `jsonwebtoken` | 10 (features: aws_lc_rs) | JWT トークンの生成 (`encode`) と検証 (`decode`)。v10 では暗号バックエンドの feature 指定が必須 |
