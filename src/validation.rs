@@ -18,6 +18,10 @@ pub fn validate_email(email: &str) -> Result<(), String> {
     }
 }
 
+pub fn normalize_email(email: &str) -> String {
+    email.trim().to_ascii_lowercase()
+}
+
 pub fn validate_password(password: &str) -> Result<(), String> {
     if password.is_empty() {
         Err("password is empty".to_string())
@@ -81,7 +85,18 @@ mod tests {
     #[test]
     fn email_without_at_is_rejected() {
         let err = validate_email("invalid-email").unwrap_err();
-        assert!(err.contains("invalid"), "Expected 'invalid' in error: {err}");
+        assert!(
+            err.contains("invalid"),
+            "Expected 'invalid' in error: {err}"
+        );
+    }
+
+    #[test]
+    fn normalize_email_trims_and_lowercases() {
+        assert_eq!(
+            normalize_email("  User@Example.COM  "),
+            "user@example.com"
+        );
     }
 
     // --- validate_password ---
