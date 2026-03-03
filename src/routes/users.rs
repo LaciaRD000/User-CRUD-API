@@ -5,6 +5,7 @@ use axum::{
 };
 
 use crate::{
+    auth::Claims,
     errors::ApiError,
     models::{UpdateUser, User},
     state::AppState,
@@ -14,10 +15,11 @@ use crate::{
 pub async fn list_users(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<User>>, ApiError> {
-    let users: Vec<User> = sqlx::query_as("SELECT * FROM users ORDER BY id")
-        .fetch_all(&state.db)
-        .await
-        .map_err(|err| ApiError::Internal(err.to_string()))?;
+    let users: Vec<User> =
+        sqlx::query_as("SELECT id, username, email FROM users ORDER BY id")
+            .fetch_all(&state.db)
+            .await
+            .map_err(|err| ApiError::Internal(err.to_string()))?;
     Ok(Json(users))
 }
 
@@ -26,7 +28,7 @@ pub async fn get_user(
     Path(user_id): Path<i64>,
 ) -> Result<Json<User>, ApiError> {
     let user: Option<User> =
-        sqlx::query_as("SELECT * FROM users WHERE id = $1")
+        sqlx::query_as("SELECT id, username, email FROM users WHERE id = $1")
             .bind(user_id)
             .fetch_optional(&state.db)
             .await
@@ -41,8 +43,17 @@ pub async fn get_user(
 pub async fn update_user(
     State(state): State<AppState>,
     Path(user_id): Path<i64>,
+    claims: Claims,
     body: Json<UpdateUser>,
 ) -> Result<Json<User>, ApiError> {
+    let auth_user_id = claims
+        .sub
+        .parse::<i64>()
+        .map_err(|err| ApiError::Internal(err.to_string()))?;
+    if auth_user_id != user_id {
+        return Err(ApiError::Forbidden);
+    }
+
     if let Some(ref username) = body.username {
         validate_username(username).map_err(|err| ApiError::BadRequest(err))?;
     }
@@ -51,7 +62,7 @@ pub async fn update_user(
         validate_email(email).map_err(|err| ApiError::BadRequest(err))?;
     }
 
-    let user: User = sqlx::query_as("UPDATE users SET username = COALESCE($1, username), email = COALESCE($2, email) where id = $3 RETURNING *")
+    let user: User = sqlx::query_as("UPDATE users SET username = COALESCE($1, username), email = COALESCE($2, email) where id = $3 RETURNING id, username, email")
         .bind(&body.username)
         .bind(&body.email)
         .bind(user_id)
@@ -65,7 +76,16 @@ pub async fn update_user(
 pub async fn delete_user(
     State(state): State<AppState>,
     Path(user_id): Path<i64>,
+    claims: Claims,
 ) -> Result<StatusCode, ApiError> {
+    let auth_user_id = claims
+        .sub
+        .parse::<i64>()
+        .map_err(|err| ApiError::Internal(err.to_string()))?;
+    if auth_user_id != user_id {
+        return Err(ApiError::Forbidden);
+    }
+
     let result = sqlx::query("DELETE FROM users WHERE id = $1")
         .bind(user_id)
         .execute(&state.db)
