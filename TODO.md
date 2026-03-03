@@ -32,6 +32,20 @@ DESIGN.md の実装ステップに基づくタスク管理。
 - [x] 23. `routes/users.rs` — create_user 削除済み, 認可チェック追加, `SELECT *` を明示的カラム指定に変更
 - [x] 24. `main.rs` — JWT_SECRET 読み込み, AppState::new 引数追加, POST /users 削除済み, auth ルート追加, CORS に allow_headers 追加
 
+## Phase 3: セキュリティ強化 (Step 25-27)
+
+- [x] 25. `Cargo.toml` — `tower_governor` 0.8 を追加
+- [x] 26. `routes/auth.rs` — `login` でリフレッシュトークン発行前に既存トークンを全削除
+- [x] 27. `main.rs` — `GovernorLayer` を認証・ユーザールートそれぞれに適用, `into_make_service_with_connect_info::<SocketAddr>()` に変更
+
+## Phase 4: ミドルウェア追加
+
+- [ ] `tower-http` の `CompressionLayer` — レスポンスの gzip 圧縮
+- [ ] `tower-http` の `RequestBodyLimitLayer` — リクエストボディのサイズ上限設定
+- [ ] `tower-http` の `TimeoutLayer` — リクエスト処理のタイムアウト設定
+- [ ] `tower-http` の `NormalizePathLayer` — 末尾スラッシュの正規化（`/users/` → `/users`）
+- [ ] `tower-helmet` の `SecureHeaders` — セキュリティヘッダー一括設定（HSTS 等）
+
 ## コーディング規約の残タスク
 
 - [x] `routes/users.rs` の SQL で `SELECT *` / `RETURNING *` を明示的カラム指定に変更 (Step 23 に含まれる)

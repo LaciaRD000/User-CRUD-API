@@ -41,7 +41,7 @@ REFRESH_TOKEN_EXPIRY_DAYS=7
 
 ### `main.rs` — エントリーポイント
 
-**役割**: アプリケーションの起動、ルーティング定義、ミドルウェア(トレースレイヤー、CORS)の設定
+**役割**: アプリケーションの起動、ルーティング定義、ミドルウェア(トレースレイヤー、CORS、レートリミット)の設定
 
 **モジュール宣言**:
 - `mod auth;`
@@ -57,7 +57,7 @@ REFRESH_TOKEN_EXPIRY_DAYS=7
 
 | 関数 | シグネチャ | 説明 |
 |------|-----------|------|
-| `main` | `#[tokio::main] async fn main()` | .env 読み込み → `tracing_subscriber::registry()` + `EnvFilter` + `fmt::layer()` で tracing 初期化 → DB接続プール作成 → JWT_SECRET 読み込み → AppState 生成 → CORS・トレースレイヤー設定 → Router にルート登録 → `0.0.0.0:3000` で起動 |
+| `main` | `#[tokio::main] async fn main()` | .env 読み込み → `tracing_subscriber::registry()` + `EnvFilter` + `fmt::layer()` で tracing 初期化 → DB接続プール作成 → JWT_SECRET 読み込み → AppState 生成 → レートリミット・CORS・トレースレイヤー設定 → Router にルート登録 → `0.0.0.0:3000` で起動 |
 
 **ルート定義**:
 
@@ -73,8 +73,57 @@ REFRESH_TOKEN_EXPIRY_DAYS=7
 | DELETE | `/users/{id}` | `users::delete_user` | **必要 + 本人のみ** |
 
 **ミドルウェア**:
+- `GovernorLayer` — IP ベースのレートリミット。ルートグループごとに異なる設定を適用する。超過時は `429 Too Many Requests` を返す
 - `TraceLayer` — 全リクエスト/レスポンスを自動ログ出力
 - `CorsLayer` — 全オリジン許可、GET/POST/PUT/DELETE メソッド許可、`Authorization` / `Content-Type` ヘッダー許可
+
+**レートリミット設定**:
+
+| ルートグループ | `per_second` | `burst_size` | 理由 |
+|--------------|-------------|-------------|------|
+| 認証ルート (`/auth/*`) | 1 | 5 | bcrypt が重い + ブルートフォース防止のため厳しく制限 |
+| ユーザールート (`/users/*`) | 10 | 50 | 軽い SELECT クエリが中心。正規ユーザーの利便性を優先 |
+
+- ルートグループごとに別の `GovernorConfig` を作成し、それぞれの `Router` に `.layer()` で適用してから `merge` で合流する
+
+```rust
+// レートリミット設定
+let auth_governor = GovernorConfigBuilder::default()
+    .per_second(1)
+    .burst_size(5)
+    .finish()
+    .unwrap();
+
+let user_governor = GovernorConfigBuilder::default()
+    .per_second(10)
+    .burst_size(50)
+    .finish()
+    .unwrap();
+
+// 認証ルート（厳しいレートリミット）
+let auth_routes = Router::new()
+    .route("/auth/register", post(...))
+    .route("/auth/login", post(...))
+    .route("/auth/refresh", post(...))
+    .route("/auth/logout", post(...))
+    .layer(GovernorLayer::new(&auth_governor));
+
+// ユーザールート（緩いレートリミット）
+let user_routes = Router::new()
+    .route("/users", get(...))
+    .route("/users/{id}", get(...).put(...).delete(...))
+    .layer(GovernorLayer::new(&user_governor));
+
+// 合流
+let app = Router::new()
+    .merge(auth_routes)
+    .merge(user_routes)
+    .with_state(state)
+    .layer(cors)
+    .layer(TraceLayer::new_for_http());
+```
+
+> **ポイント**: `GovernorLayer` は IP アドレスでクライアントを識別する。IP を取得するために、`axum::serve` の引数を `app.into_make_service_with_connect_info::<SocketAddr>()` に変更する必要がある
 
 ---
 
@@ -401,9 +450,10 @@ pub use user::*;
 2. 見つからなければ `ApiError::Unauthorized`
 3. `bcrypt::verify(&body.password, &password_hash)` でパスワード照合
 4. 不一致なら `ApiError::Unauthorized`
-5. `create_token(user.id, &state.jwt_secret, expiry_minutes)` でアクセストークン発行
-6. `issue_refresh_token(&state, user.id)` でリフレッシュトークン発行
-7. `Json(AuthResponse { access_token, refresh_token })` を返す
+5. `DELETE FROM refresh_tokens WHERE user_id = $1` で既存リフレッシュトークンを全削除（古いセッションを無効化）
+6. `create_token(user.id, &state.jwt_secret, expiry_minutes)` でアクセストークン発行
+7. `issue_refresh_token(&state, user.id)` でリフレッシュトークン発行
+8. `Json(AuthResponse { access_token, refresh_token })` を返す
 
 **`refresh` の処理フロー**:
 1. `SELECT id, user_id, token, expires_at FROM refresh_tokens WHERE token = $1` で DB 検索
@@ -474,6 +524,7 @@ pub mod users;
 | `bcrypt` | 0.18 | パスワードのハッシュ化 (`hash`) と照合 (`verify`) |
 | `chrono` | 0.4 (features: serde) | トークン有効期限の計算 (`Utc::now()` + Duration) |
 | `uuid` | 1 (features: v4) | リフレッシュトークンの生成 (`Uuid::new_v4`) |
+| `tower_governor` | 0.8 | 認証エンドポイントへの IP ベースレートリミット (`GovernorLayer`, `GovernorConfigBuilder`) |
 
 ---
 
@@ -508,6 +559,12 @@ pub mod users;
 22. **`routes/mod.rs`** — `pub mod auth;` 追加
 23. **`routes/users.rs`** — `create_user` 削除、認可チェック追加（`claims.sub == user_id`）、明示的カラム指定（`SELECT id, username, email`）
 24. **`main.rs`** — `mod auth;`, JWT_SECRET 読み込み, `POST /users` 削除, `auth/refresh` + `auth/logout` ルート追加, CORS に `allow_headers` 追加
+
+### Phase 3: セキュリティ強化
+
+25. **`Cargo.toml`** — `tower_governor` 0.8 を追加
+26. **`routes/auth.rs`** — `login` でリフレッシュトークン発行前に既存トークンを全削除
+27. **`main.rs`** — `GovernorConfigBuilder` で `per_second: 1, burst_size: 5` を設定 → 認証ルートにのみ `GovernorLayer` を適用 → `axum::serve` を `into_make_service_with_connect_info::<SocketAddr>()` に変更
 
 ---
 

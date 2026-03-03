@@ -98,6 +98,12 @@ pub async fn login(
         return Err(ApiError::Unauthorized);
     }
 
+    sqlx::query("DELETE FROM refresh_tokens WHERE user_id = $1")
+        .bind(user.id)
+        .execute(&state.db)
+        .await
+        .map_err(|err| ApiError::Internal(err.to_string()))?;
+
     let access_token = create_token(
         user.id,
         &state.jwt_secret,

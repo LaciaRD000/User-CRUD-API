@@ -7,6 +7,8 @@ mod snowflake;
 mod state;
 mod validation;
 
+use std::net::SocketAddr;
+
 use axum::{
     Router,
     http::{
@@ -16,6 +18,7 @@ use axum::{
     routing::{get, post},
 };
 use dotenvy::dotenv;
+use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder};
 use tower_http::{
     cors::{Any, CorsLayer},
     trace::TraceLayer,
@@ -71,11 +74,26 @@ async fn main() {
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
         .allow_headers([AUTHORIZATION, CONTENT_TYPE]);
 
-    let app = Router::new()
+    let auth_governor = GovernorConfigBuilder::default()
+        .per_second(1)
+        .burst_size(5)
+        .finish()
+        .unwrap();
+
+    let user_governor = GovernorConfigBuilder::default()
+        .per_second(10)
+        .burst_size(50)
+        .finish()
+        .unwrap();
+
+    let auth_routes = Router::new()
         .route("/auth/register", post(auth_routes::register))
         .route("/auth/login", post(auth_routes::login))
         .route("/auth/refresh", post(auth_routes::refresh))
         .route("/auth/logout", post(auth_routes::logout))
+        .layer(GovernorLayer::new(auth_governor));
+
+    let user_routes = Router::new()
         .route("/users", get(users::list_users))
         .route(
             "/users/{id}",
@@ -83,6 +101,11 @@ async fn main() {
                 .put(users::update_user)
                 .delete(users::delete_user),
         )
+        .layer(GovernorLayer::new(user_governor));
+
+    let app = Router::new()
+        .merge(auth_routes)
+        .merge(user_routes)
         .with_state(state)
         .layer(cors)
         .layer(TraceLayer::new_for_http());
@@ -91,7 +114,10 @@ async fn main() {
         .await
         .expect("ポートのバインドに失敗しました");
 
-    axum::serve(listener, app)
-        .await
-        .expect("サーバーの起動に失敗しました");
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .expect("サーバーの起動に失敗しました");
 }
