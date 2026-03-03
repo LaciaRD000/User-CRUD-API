@@ -7,20 +7,24 @@ mod snowflake;
 mod state;
 mod validation;
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 
 use axum::{
     Router,
+    extract::DefaultBodyLimit,
     http::{
-        Method,
+        Method, StatusCode,
         header::{AUTHORIZATION, CONTENT_TYPE},
     },
     routing::{get, post},
 };
 use dotenvy::dotenv;
+use tower::ServiceBuilder;
 use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder};
 use tower_http::{
+    compression::CompressionLayer,
     cors::{Any, CorsLayer},
+    timeout::TimeoutLayer,
     trace::TraceLayer,
 };
 use tracing_subscriber::{
@@ -107,8 +111,17 @@ async fn main() {
         .merge(auth_routes)
         .merge(user_routes)
         .with_state(state)
-        .layer(cors)
-        .layer(TraceLayer::new_for_http());
+        .layer(
+            ServiceBuilder::new()
+                .layer(TraceLayer::new_for_http())
+                .layer(cors)
+                .layer(CompressionLayer::new())
+                .layer(DefaultBodyLimit::max(5 * 1024 * 1024))
+                .layer(TimeoutLayer::with_status_code(
+                    StatusCode::REQUEST_TIMEOUT,
+                    Duration::from_secs(10),
+                )),
+        );
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
         .await

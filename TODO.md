@@ -41,7 +41,7 @@ DESIGN.md の実装ステップに基づくタスク管理。
 ## Phase 4: ミドルウェア追加
 
 - [ ] `tower-http` の `CompressionLayer` — レスポンスの gzip 圧縮
-- [ ] `tower-http` の `RequestBodyLimitLayer` — リクエストボディのサイズ上限設定
+- [ ] `axum::extract::DefaultBodyLimit` — リクエストボディのサイズ上限設定
 - [ ] `tower-http` の `TimeoutLayer` — リクエスト処理のタイムアウト設定
 - [ ] `tower-http` の `NormalizePathLayer` — 末尾スラッシュの正規化（`/users/` → `/users`）
 - [ ] `tower-helmet` の `SecureHeaders` — セキュリティヘッダー一括設定（HSTS 等）
