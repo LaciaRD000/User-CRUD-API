@@ -10,7 +10,7 @@ mod validation;
 use std::{net::SocketAddr, time::Duration};
 
 use axum::{
-    Router,
+    Router, ServiceExt,
     extract::DefaultBodyLimit,
     http::{
         Method, StatusCode,
@@ -19,11 +19,13 @@ use axum::{
     routing::{get, post},
 };
 use dotenvy::dotenv;
-use tower::ServiceBuilder;
+use tower::{Layer, ServiceBuilder};
 use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder};
+use tower_helmet::HelmetLayer;
 use tower_http::{
     compression::CompressionLayer,
     cors::{Any, CorsLayer},
+    normalize_path::{NormalizePath, NormalizePathLayer},
     timeout::TimeoutLayer,
     trace::TraceLayer,
 };
@@ -120,16 +122,19 @@ async fn main() {
                 .layer(TimeoutLayer::with_status_code(
                     StatusCode::REQUEST_TIMEOUT,
                     Duration::from_secs(10),
-                )),
+                ))
+                .layer(HelmetLayer::with_defaults()),
         );
+
+    let app: NormalizePath<Router> =
+        NormalizePathLayer::trim_trailing_slash().layer(app);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
         .await
         .expect("ポートのバインドに失敗しました");
-
     axum::serve(
-        listener,
-        app.into_make_service_with_connect_info::<SocketAddr>(),
+      listener,
+      ServiceExt::<axum::http::Request<axum::body::Body>>::into_make_service_with_connect_info::<SocketAddr>(app),
     )
     .await
     .expect("サーバーの起動に失敗しました");
