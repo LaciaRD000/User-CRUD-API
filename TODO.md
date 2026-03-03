@@ -73,5 +73,5 @@ DESIGN.md の実装ステップに基づくタスク管理。
 ## Phase 8: セキュリティ改善（これから）
 
 - [x] 35. email 正規化（`trim` + `lowercase`）とDB側の case-insensitive UNIQUE（`citext` または `unique(lower(email))`）
-- [ ] 36. login のタイミング差対策（email不存在でも bcrypt verify を走らせる）
+- [x] 36. login のタイミング差対策（email不存在でも bcrypt verify を走らせる）
 - [x] 37. JWT 検証の追加強化（`JWT_LEEWAY_SECONDS`/必須claim/`JWT_SECRET` 長チェックの明示）

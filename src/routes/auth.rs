@@ -125,21 +125,29 @@ pub async fn login(
     body: Json<LoginUser>,
 ) -> Result<Json<AuthResponse>, ApiError> {
     let email = normalize_email(&body.email);
-    let user: User = sqlx::query_as(
+    let user: Option<User> = sqlx::query_as(
         "SELECT id, username, email, password_hash FROM users WHERE email = $1",
     )
     .bind(&email)
     .fetch_optional(&state.db)
     .await
-    .map_err(|err| ApiError::Internal(err.to_string()))?
-    .ok_or(ApiError::Unauthorized)?;
+    .map_err(|err| ApiError::Internal(err.to_string()))?;
 
-    let is_valid = bcrypt::verify(&body.password, &user.password_hash)
+    // Always perform a bcrypt verification to reduce timing differences between
+    // "email not found" and "password mismatch".
+    let password_hash = user
+        .as_ref()
+        .map(|u| u.password_hash.as_str())
+        .unwrap_or(state.dummy_password_hash.as_str());
+    let is_valid = bcrypt::verify(&body.password, password_hash)
         .map_err(|err| ApiError::Internal(err.to_string()))?;
 
-    if !is_valid {
-        return Err(ApiError::Unauthorized);
-    }
+    let user = match (user, is_valid) {
+        (Some(user), true) => user,
+        _ => {
+            return Err(ApiError::Unauthorized);
+        }
+    };
 
     sqlx::query("DELETE FROM refresh_tokens WHERE user_id = $1")
         .bind(user.id)

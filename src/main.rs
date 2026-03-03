@@ -84,6 +84,11 @@ async fn main() {
         .expect("SNOWFLAKE_MACHINE_ID must be set")
         .parse::<u16>()
         .expect("SNOWFLAKE_MACHINE_ID could not parse u16");
+    let dummy_password_hash = bcrypt::hash(
+        "dummy-password-not-a-secret",
+        bcrypt::DEFAULT_COST,
+    )
+    .expect("Failed to generate dummy bcrypt hash");
     let pool = db::create_pool(&database_url)
         .await
         .expect("Failed to connect to database");
@@ -98,6 +103,7 @@ async fn main() {
         access_token_expiry_minutes,
         refresh_token_expiry_days,
         refresh_token_pepper,
+        dummy_password_hash,
     );
 
     let cors = CorsLayer::new()

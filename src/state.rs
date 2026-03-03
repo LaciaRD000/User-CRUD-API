@@ -15,6 +15,7 @@ pub struct AppState {
     pub access_token_expiry_minutes: u64,
     pub refresh_token_expiry_days: u64,
     pub refresh_token_pepper: String,
+    pub dummy_password_hash: String,
 }
 
 impl AppState {
@@ -28,6 +29,7 @@ impl AppState {
         access_token_expiry_minutes: u64,
         refresh_token_expiry_days: u64,
         refresh_token_pepper: String,
+        dummy_password_hash: String,
     ) -> Self {
         Self {
             db: pool,
@@ -41,6 +43,7 @@ impl AppState {
             access_token_expiry_minutes,
             refresh_token_expiry_days,
             refresh_token_pepper,
+            dummy_password_hash,
         }
     }
 }
