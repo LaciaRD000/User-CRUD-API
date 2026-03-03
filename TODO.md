@@ -18,11 +18,11 @@ DESIGN.md の実装ステップに基づくタスク管理。
 
 ## Phase 2: JWT 認証 + 認可 + リフレッシュトークン (Step 12-24)
 
-- [ ] 12. Supabase — `ALTER TABLE users` + `CREATE TABLE refresh_tokens`
+- [x] 12. Supabase — `ALTER TABLE users` + `CREATE TABLE refresh_tokens`
 - [x] 13. `Cargo.toml` — jsonwebtoken, bcrypt, chrono, uuid 追加
-- [ ] 14. `.env` — `JWT_SECRET`, `ACCESS_TOKEN_EXPIRY_MINUTES`, `REFRESH_TOKEN_EXPIRY_DAYS` 追加
-- [x] 15. `models/user.rs` — RegisterUser, LoginUser, AuthResponse, RefreshRequest, LogoutRequest 追加, password_hash に `#[sqlx(default)]`
-- [x] 16. `models/mod.rs` — 再エクスポート更新
+- [x] 14. `.env` — `JWT_SECRET`, `ACCESS_TOKEN_EXPIRY_MINUTES`, `REFRESH_TOKEN_EXPIRY_DAYS` 追加
+- [x] 15. `models/user.rs` + `models/auth.rs` — 認証関連構造体を auth.rs に分離, RefreshToken 追加, password_hash に `#[sqlx(default)]`
+- [x] 16. `models/mod.rs` — auth モジュール追加, 再エクスポート更新
 - [x] 17. `errors.rs` — Unauthorized + Forbidden 追加
 - [x] 18. `validation.rs` — validate_password 追加
 - [x] 19. `state.rs` — jwt_secret, access_token_expiry_minutes, refresh_token_expiry_days 追加

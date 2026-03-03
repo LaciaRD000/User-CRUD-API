@@ -122,6 +122,12 @@ pub async fn refresh(
     State(state): State<AppState>,
     body: Json<RefreshRequest>,
 ) -> Result<Json<AuthResponse>, ApiError> {
+    let user: Refre = sqlx::query_as("SELECT id, user_id, token, expires_at FROM refresh_tokens WHERE token = $1")
+        .bind(&body.refresh_token)
+        .fetch_optional(&state.db)
+        .await
+    .map_err(|err| ApiError::Internal(err.to_string()))?
+    .ok_or(|_| ApiError::Unauthorized)?;
 }
 
 pub async fn logout(

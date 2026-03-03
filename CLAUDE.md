@@ -46,7 +46,7 @@ Rust製のユーザー管理 REST API。Axum + Tokio で構築し、Supabase (Po
 詳細な設計は `DESIGN.md` を参照。
 
 ## ToDo
-実装の進捗管理は `ToDo.md` を参照。GitHub にプッシュする際は、必ず `ToDo.md` の進捗を最新の状態に更新すること。
+実装の進捗管理は `TODO.md` を参照。GitHub にプッシュする際は、必ず `TODO.md` の進捗を最新の状態に更新すること。
 
 ## Conventions
 - 日本語でコミュニケーションする
