@@ -31,8 +31,13 @@ src/
 ```
 DATABASE_URL=postgresql://postgres:<password>@<host>:5432/postgres
 JWT_SECRET=32文字以上のランダム文字列
+JWT_ISSUER=user-api
+JWT_AUDIENCE=user-api
+JWT_LEEWAY_SECONDS=60
 ACCESS_TOKEN_EXPIRY_MINUTES=60
 REFRESH_TOKEN_EXPIRY_DAYS=7
+REFRESH_TOKEN_PEPPER=32文字以上のランダム文字列
+SNOWFLAKE_MACHINE_ID=10
 ```
 
 ---
@@ -73,7 +78,7 @@ REFRESH_TOKEN_EXPIRY_DAYS=7
 | DELETE | `/users/{id}` | `users::delete_user` | **必要 + 本人のみ** |
 
 **ミドルウェア**:
-- `GovernorLayer` — IP ベースのレートリミット。ルートグループごとに異なる設定を適用する。超過時は `429 Too Many Requests` を返す
+- `GovernorLayer` — IP ベースのレートリミット。ルートグループごとに異なる設定を適用する。超過時は `429 Too Many Requests` を返す。キー抽出は `SmartIpKeyExtractor` を使用し、`Forwarded` / `X-Forwarded-For` / `X-Real-Ip` を優先してクライアントIPを解決し、無ければ peer IP にフォールバックする（これらのヘッダーは信頼できるリバースプロキシ経由でのみ利用する前提）
 - `TraceLayer` — 全リクエスト/レスポンスを自動ログ出力
 - `CorsLayer` — 全オリジン許可、GET/POST/PUT/DELETE メソッド許可、`Authorization` / `Content-Type` ヘッダー許可
 - `CompressionLayer` — レスポンスの gzip 圧縮
@@ -94,12 +99,14 @@ REFRESH_TOKEN_EXPIRY_DAYS=7
 ```rust
 // レートリミット設定
 let auth_governor = GovernorConfigBuilder::default()
+    .key_extractor(SmartIpKeyExtractor)
     .per_second(1)
     .burst_size(5)
     .finish()
     .unwrap();
 
 let user_governor = GovernorConfigBuilder::default()
+    .key_extractor(SmartIpKeyExtractor)
     .per_second(10)
     .burst_size(50)
     .finish()
@@ -173,7 +180,7 @@ Claims (Serialize, Deserialize)
 | 関数 | シグネチャ | 説明 |
 |------|-----------|------|
 | `create_token` | `pub fn create_token(user_id: i64, secret: &str, expiry_minutes: u64) -> Result<String, jsonwebtoken::errors::Error>` | `user_id.to_string()` で sub を生成 → Claims を組み立て → `jsonwebtoken::encode` で HS256 署名付きトークンを生成して返す |
-| `validate_token` | `pub fn validate_token(token: &str, secret: &str) -> Result<Claims, jsonwebtoken::errors::Error>` | `jsonwebtoken::decode` でトークンを検証・デコードして Claims を返す。期限切れ・署名不正はエラー |
+| `validate_token` | `pub fn validate_token(token: &str, secret: &str) -> Result<Claims, jsonwebtoken::errors::Error>` | `jsonwebtoken::decode` でトークンを検証・デコードして Claims を返す。**許可アルゴリズムは HS256 のみに固定**する。期限切れ・署名不正はエラー |
 
 **トレイト実装**:
 
@@ -219,7 +226,7 @@ CREATE TABLE users (
 CREATE TABLE refresh_tokens (
     id         BIGINT PRIMARY KEY,
     user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    token      TEXT NOT NULL UNIQUE,
+    token_hash TEXT NOT NULL UNIQUE,
     expires_at TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -230,8 +237,17 @@ CREATE TABLE refresh_tokens (
 - `email` に `UNIQUE` 制約 — 同じメールアドレスで重複登録を防ぐ
 - `password_hash` — bcrypt でハッシュ化したパスワードを格納
 - `created_at` — レコード作成日時を自動記録
-- `refresh_tokens.token` — UUID v4 文字列。`UNIQUE` 制約で一意性を保証
+- `refresh_tokens.token_hash` — リフレッシュトークンのハッシュ値。`UNIQUE` 制約で一意性を保証
 - `ON DELETE CASCADE` — ユーザー削除時にリフレッシュトークンも自動削除
+
+**email の正規化と制約（推奨）**:
+- アプリ側で `trim` + `lowercase` して保存・検索する（`User@Example.COM` と `user@example.com` を同一扱いにする）
+- DB側で case-insensitive な一意制約を追加する（関数インデックス）
+
+```sql
+-- case-insensitive UNIQUE (Option 2)
+CREATE UNIQUE INDEX users_email_lower_key ON users (lower(email));
+```
 
 ---
 
@@ -399,7 +415,7 @@ LogoutRequest (Deserialize)          — POST /auth/logout リクエストボデ
 RefreshToken (FromRow)               — refresh_tokens テーブルの行マッピング用
 ├── id         : i64                  ← Snowflake ID
 ├── user_id    : i64                  ← ユーザーID
-├── token      : String               ← UUID v4 リフレッシュトークン
+├── token_hash : String               ← リフレッシュトークンのハッシュ値
 └── expires_at : DateTime<Utc>        ← 有効期限 (TIMESTAMPTZ → DateTime<Utc>)
 ```
 
@@ -448,10 +464,11 @@ pub use user::*;
 
 **`issue_refresh_token` の処理フロー**:
 1. `Uuid::new_v4().to_string()` でリフレッシュトークン生成
-2. `state.snowflake.lock().unwrap().generate()` で Snowflake ID 生成
-3. `Utc::now() + Duration::days(state.refresh_token_expiry_days)` で有効期限を計算
-4. `INSERT INTO refresh_tokens (id, user_id, token, expires_at) VALUES ($1, $2, $3, $4)` で DB に保存
-5. トークン文字列を返す
+2. 生成した生トークンをハッシュ化して `token_hash` を作る（DB にはハッシュのみ保存し、生トークンは保持しない）
+3. `state.snowflake.lock().unwrap().generate()` で Snowflake ID 生成
+4. `Utc::now() + Duration::days(state.refresh_token_expiry_days)` で有効期限を計算
+5. `INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at) VALUES ($1, $2, $3, $4)` で DB に保存
+6. クライアント向けに返す値は生トークン（`refresh_token`）とする
 
 > **ポイント**: `register`, `login`, `refresh` の3箇所で同じリフレッシュトークン発行処理を繰り返すため、ヘルパー関数に切り出して DRY にする。`pub` を付けない（ファイル内でのみ使用）。
 
@@ -475,17 +492,21 @@ pub use user::*;
 8. `Json(AuthResponse { access_token, refresh_token })` を返す
 
 **`refresh` の処理フロー**:
-1. `SELECT id, user_id, token, expires_at FROM refresh_tokens WHERE token = $1` で DB 検索
-2. 見つからなければ `ApiError::Unauthorized`
-3. `expires_at < Utc::now()` なら期限切れ → 古いトークンを DELETE → `ApiError::Unauthorized`
-4. 古いリフレッシュトークンを DELETE（ローテーション）
-5. `create_token(user_id, &state.jwt_secret, expiry_minutes)` で新しいアクセストークン発行
-6. `issue_refresh_token(&state, user_id)` で新しいリフレッシュトークン発行
-7. `Json(AuthResponse { access_token, refresh_token })` を返す
+1. リクエストから生トークン（`refresh_token`）を受け取る
+2. 受け取った生トークンをハッシュ化して `token_hash` を作る
+3. `SELECT id, user_id, token_hash, expires_at FROM refresh_tokens WHERE token_hash = $1` で DB 検索
+4. 見つからなければ `ApiError::Unauthorized`
+5. `expires_at < Utc::now()` なら期限切れ → 古いトークンを DELETE → `ApiError::Unauthorized`
+6. 古いリフレッシュトークンを DELETE（ローテーション）
+7. `create_token(user_id, &state.jwt_secret, expiry_minutes)` で新しいアクセストークン発行
+8. `issue_refresh_token(&state, user_id)` で新しいリフレッシュトークン発行
+9. `Json(AuthResponse { access_token, refresh_token })` を返す
 
 **`logout` の処理フロー**:
-1. `DELETE FROM refresh_tokens WHERE token = $1 AND user_id = $2` で DB から削除（`$2` は `claims.sub` をパースした `i64`）
-2. 204 No Content を返す
+1. リクエストから生トークン（`refresh_token`）を受け取る
+2. 受け取った生トークンをハッシュ化して `token_hash` を作る
+3. `DELETE FROM refresh_tokens WHERE token_hash = $1 AND user_id = $2` で DB から削除（`$2` は `claims.sub` をパースした `i64`）
+4. 204 No Content を返す
 
 > **セキュリティ上の注意**: ログイン失敗時に「メールが存在しない」「パスワードが違う」を区別せず、一律 `Unauthorized` を返す。これにより、攻撃者がメールアドレスの存在有無を推測できないようにする。
 
@@ -503,10 +524,18 @@ pub use user::*;
 
 | 関数 | シグネチャ | 認証 | 説明 |
 |------|-----------|------|------|
-| `list_users` | `async fn(State) -> Result<Json<Vec<User>>, ApiError>` | 不要 | `SELECT id, username, email FROM users ORDER BY id` で全ユーザーを取得して返す |
+| `list_users` | `async fn(State) -> Result<Json<Vec<User>>, ApiError>` | 不要 | `limit` / `after_id` をクエリから受け取る（未指定時は既定値）→ バリデーション → `SELECT id, username, email FROM users WHERE id > $after_id ORDER BY id LIMIT $limit` で取得して返す |
 | `get_user` | `async fn(State, Path<i64>) -> Result<Json<User>, ApiError>` | 不要 | `SELECT id, username, email FROM users WHERE id = $1` で検索 → 見つかれば返す、なければ NotFound |
 | `update_user` | `async fn(State, Path<i64>, Claims, Json<UpdateUser>) -> Result<Json<User>, ApiError>` | **必要 + 本人のみ** | `claims.sub` と Path の `user_id` を比較 → 不一致なら `ApiError::Forbidden` → バリデーション → `UPDATE users SET username = COALESCE($1, username), email = COALESCE($2, email) WHERE id = $3 RETURNING id, username, email` で更新 |
 | `delete_user` | `async fn(State, Path<i64>, Claims) -> Result<StatusCode, ApiError>` | **必要 + 本人のみ** | `claims.sub` と Path の `user_id` を比較 → 不一致なら `ApiError::Forbidden` → `DELETE FROM users WHERE id = $1` で削除 → 204 No Content、なければ NotFound |
+
+**`list_users` の処理フロー（カーソル/キーセットページネーション）**:
+1. クエリから `limit` / `after_id` を受け取る（例: `GET /users?limit=20&after_id=123`）
+2. 未指定の値には既定値を適用する（例: `limit=20`、`after_id` 未指定なら先頭から）
+3. `limit` の上限・`after_id` の下限を検証し、範囲外は `ApiError::BadRequest` を返す
+4. `after_id` が指定されている場合は `SELECT id, username, email FROM users WHERE id > $1 ORDER BY id LIMIT $2` を実行する
+5. `after_id` が未指定の場合は `SELECT id, username, email FROM users ORDER BY id LIMIT $1` を実行する
+6. `Json<Vec<User>>` を返す（次ページはレスポンスの最後の `id` を `after_id` に指定する）
 
 - `Claims` を引数に加えるだけで、Axum が自動的に `FromRequestParts` を呼び出して認証を実行する
 - トークンが無い/無効な場合は `ApiError::Unauthorized` が自動的に返され、ハンドラーまで到達しない
@@ -586,6 +615,10 @@ pub mod users;
 25. **`Cargo.toml`** — `tower_governor` 0.8 を追加
 26. **`routes/auth.rs`** — `login` でリフレッシュトークン発行前に既存トークンを全削除
 27. **`main.rs`** — `GovernorConfigBuilder` で `per_second: 1, burst_size: 5` を設定 → 認証ルートにのみ `GovernorLayer` を適用 → `axum::serve` を `into_make_service_with_connect_info::<SocketAddr>()` に変更
+
+### Phase 4: 今後の拡張（未実装）
+
+29. **`routes/auth.rs` + DB スキーマ** — リフレッシュトークンを平文保存からハッシュ保存へ変更（`refresh` / `logout` はハッシュ照合）
 
 ---
 

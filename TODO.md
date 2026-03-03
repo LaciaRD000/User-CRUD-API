@@ -56,3 +56,22 @@ DESIGN.md の実装ステップに基づくタスク管理。
 ## コーディング規約の残タスク
 
 - [x] `routes/users.rs` の SQL で `SELECT *` / `RETURNING *` を明示的カラム指定に変更 (Step 23 に含まれる)
+
+## Phase 6: 今後の課題（未実装）
+
+- [x] 28. `GET /users` にページネーションを追加（`limit` / `after_id` クエリ、既定値と上限のバリデーションを含む）
+- [x] 29. リフレッシュトークンの保存方式をハッシュ化に変更（`refresh_tokens` はハッシュ値を保持し、`refresh` / `logout` はハッシュ照合）
+
+## Phase 7: セキュリティ改善（実施済み）
+
+- [x] 30. `.env` — `SNOWFLAKE_MACHINE_ID` を必須化（未設定/不正なら起動失敗）
+- [x] 31. `.env` — `REFRESH_TOKEN_PEPPER` を追加し、リフレッシュトークンハッシュを `HMAC-SHA256` 化
+- [x] 32. `.env` — `JWT_ISSUER` / `JWT_AUDIENCE` を追加し、JWT の発行/検証で `iss` / `aud` を必須化
+- [x] 33. レート制限 — `SmartIpKeyExtractor` に切り替え（`Forwarded`/`X-Forwarded-For`/`X-Real-Ip` 優先）
+- [x] 34. 重複email登録 — UNIQUE違反を `users_email_key` のみ 409 Conflict にマッピング
+
+## Phase 8: セキュリティ改善（これから）
+
+- [x] 35. email 正規化（`trim` + `lowercase`）とDB側の case-insensitive UNIQUE（`citext` または `unique(lower(email))`）
+- [ ] 36. login のタイミング差対策（email不存在でも bcrypt verify を走らせる）
+- [x] 37. JWT 検証の追加強化（`JWT_LEEWAY_SECONDS`/必須claim/`JWT_SECRET` 長チェックの明示）

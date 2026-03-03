@@ -38,8 +38,13 @@ Rust製のユーザー管理 REST API。Axum + Tokio で構築し、Supabase (Po
 ## Environment Variables (.env)
 - `DATABASE_URL` — PostgreSQL 接続文字列（必須）
 - `JWT_SECRET` — JWT 署名用シークレット、32文字以上（必須）
+- `JWT_ISSUER` — JWT の issuer（必須）
+- `JWT_AUDIENCE` — JWT の audience（必須）
+- `JWT_LEEWAY_SECONDS` — JWT 検証の leeway（秒、未設定時は 60）
 - `ACCESS_TOKEN_EXPIRY_MINUTES` — アクセストークン有効期限（分）
 - `REFRESH_TOKEN_EXPIRY_DAYS` — リフレッシュトークン有効期限（日）
+- `REFRESH_TOKEN_PEPPER` — リフレッシュトークンHMAC用のペッパー（32文字以上を推奨、必須）
+- `SNOWFLAKE_MACHINE_ID` — Snowflake 生成器の machine_id（0〜1023 を想定、必須）
 - `RUST_LOG` — ログレベル制御（例: `info`）
 
 ## Design Document
