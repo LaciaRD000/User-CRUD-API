@@ -35,6 +35,6 @@ pub struct LogoutRequest {
 pub struct RefreshToken {
     pub id: i64,
     pub user_id: i64,
-    pub token: String,
+    pub token_hash: String,
     pub expires_at: DateTime<Utc>,
 }

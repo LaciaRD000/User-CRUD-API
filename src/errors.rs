@@ -5,9 +5,11 @@ use axum::{
 };
 use serde_json::json;
 
+#[derive(Debug)]
 pub enum ApiError {
     NotFound,
     BadRequest(String),
+    Conflict(String),
     Internal(String),
     Unauthorized,
     Forbidden,
@@ -18,6 +20,10 @@ impl IntoResponse for ApiError {
         match self {
             ApiError::NotFound => {
                 (StatusCode::NOT_FOUND, Json(json!({"error": "NotFound"})))
+                    .into_response()
+            }
+            ApiError::Conflict(s) => {
+                (StatusCode::CONFLICT, Json(json!({"error": s})))
                     .into_response()
             }
             ApiError::Internal(s) => {
@@ -50,7 +56,9 @@ mod tests {
     use super::*;
     use axum::body::to_bytes;
 
-    async fn status_and_body(error: ApiError) -> (StatusCode, serde_json::Value) {
+    async fn status_and_body(
+        error: ApiError,
+    ) -> (StatusCode, serde_json::Value) {
         let response = error.into_response();
         let status = response.status();
         let bytes = to_bytes(response.into_body(), 1024).await.unwrap();
@@ -67,14 +75,24 @@ mod tests {
 
     #[tokio::test]
     async fn bad_request_returns_400_with_message() {
-        let (status, body) = status_and_body(ApiError::BadRequest("invalid input".into())).await;
+        let (status, body) =
+            status_and_body(ApiError::BadRequest("invalid input".into())).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(body["error"], "invalid input");
     }
 
     #[tokio::test]
+    async fn conflict_returns_409_with_message() {
+        let (status, body) =
+            status_and_body(ApiError::Conflict("already exists".into())).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(body["error"], "already exists");
+    }
+
+    #[tokio::test]
     async fn internal_returns_500_without_leaking_details() {
-        let (status, body) = status_and_body(ApiError::Internal("db crash".into())).await;
+        let (status, body) =
+            status_and_body(ApiError::Internal("db crash".into())).await;
         assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(body["error"], "An internal error occurred");
         assert!(!body["error"].as_str().unwrap().contains("db crash"));
