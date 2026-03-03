@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use axum::extract::FromRequestParts;
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Utc};
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 
@@ -19,7 +19,7 @@ pub fn create_token(
     secret: &str,
     expiry_minutes: u64,
 ) -> Result<String, jsonwebtoken::errors::Error> {
-    let dt: DateTime<Local> = Local::now();
+    let dt: DateTime<Utc> = Utc::now();
 
     let claims = Claims {
         sub: user_id.to_string(),

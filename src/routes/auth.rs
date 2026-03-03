@@ -130,16 +130,22 @@ pub async fn refresh(
     .map_err(|err| ApiError::Internal(err.to_string()))?
     .ok_or(ApiError::Unauthorized)?;
 
+    if user.expires_at < Utc::now() {
+        sqlx::query("DELETE FROM refresh_tokens WHERE token = $1 AND user_id = $2")
+            .bind(&body.refresh_token)
+            .bind(user.user_id)
+            .execute(&state.db)
+            .await
+            .map_err(|err| ApiError::Internal(err.to_string()))?;
+        return Err(ApiError::Unauthorized);
+    }
+
     sqlx::query("DELETE FROM refresh_tokens WHERE token = $1 AND user_id = $2")
         .bind(&body.refresh_token)
         .bind(user.user_id)
         .execute(&state.db)
         .await
         .map_err(|err| ApiError::Internal(err.to_string()))?;
-
-    if user.expires_at < Utc::now() {
-        return Err(ApiError::Unauthorized);
-    }
 
     let access_token = create_token(
         user.user_id,
