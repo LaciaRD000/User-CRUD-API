@@ -53,3 +53,57 @@ impl SnowflakeGenerator {
         id as i64
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use super::*;
+
+    #[test]
+    fn generate_returns_positive_id() {
+        let mut sf = SnowflakeGenerator::new(1);
+        let id = sf.generate();
+        assert!(id > 0, "Snowflake ID should be positive, got {id}");
+    }
+
+    #[test]
+    fn generate_returns_unique_ids() {
+        let mut sf = SnowflakeGenerator::new(1);
+        let mut ids = HashSet::new();
+
+        for _ in 0..1000 {
+            let id = sf.generate();
+            assert!(ids.insert(id), "Duplicate ID detected: {id}");
+        }
+    }
+
+    #[test]
+    fn generate_returns_increasing_ids() {
+        let mut sf = SnowflakeGenerator::new(1);
+        let mut prev = sf.generate();
+
+        for _ in 0..100 {
+            let id = sf.generate();
+            assert!(
+                id > prev,
+                "IDs should be monotonically increasing: {prev} >= {id}"
+            );
+            prev = id;
+        }
+    }
+
+    #[test]
+    fn different_machine_ids_produce_different_ids() {
+        let mut gen_a = SnowflakeGenerator::new(1);
+        let mut gen_b = SnowflakeGenerator::new(2);
+
+        let id_a = gen_a.generate();
+        let id_b = gen_b.generate();
+
+        assert_ne!(
+            id_a, id_b,
+            "Different machine IDs should produce different IDs"
+        );
+    }
+}

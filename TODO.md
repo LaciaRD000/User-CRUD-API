@@ -46,6 +46,13 @@ DESIGN.md の実装ステップに基づくタスク管理。
 - [ ] `tower-http` の `NormalizePathLayer` — 末尾スラッシュの正規化（`/users/` → `/users`）
 - [ ] `tower-helmet` の `SecureHeaders` — セキュリティヘッダー一括設定（HSTS 等）
 
+## Phase 5: ユニットテスト
+
+- [x] `snowflake.rs` — ID の正値・一意性・単調増加・machine_id 分離 (4 tests)
+- [x] `validation.rs` — username/email/password の正常系・異常系・境界値 (12 tests)
+- [x] `errors.rs` — 全 ApiError バリアントのステータスコード・JSON ボディ検証 (5 tests)
+- [x] `auth.rs` — トークン往復・不正シークレット・期限切れ・ゴミ入力・sub 一致・iat<exp (6 tests)
+
 ## コーディング規約の残タスク
 
 - [x] `routes/users.rs` の SQL で `SELECT *` / `RETURNING *` を明示的カラム指定に変更 (Step 23 に含まれる)

@@ -44,3 +44,53 @@ impl IntoResponse for ApiError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::to_bytes;
+
+    async fn status_and_body(error: ApiError) -> (StatusCode, serde_json::Value) {
+        let response = error.into_response();
+        let status = response.status();
+        let bytes = to_bytes(response.into_body(), 1024).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        (status, body)
+    }
+
+    #[tokio::test]
+    async fn not_found_returns_404() {
+        let (status, body) = status_and_body(ApiError::NotFound).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(body["error"], "NotFound");
+    }
+
+    #[tokio::test]
+    async fn bad_request_returns_400_with_message() {
+        let (status, body) = status_and_body(ApiError::BadRequest("invalid input".into())).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"], "invalid input");
+    }
+
+    #[tokio::test]
+    async fn internal_returns_500_without_leaking_details() {
+        let (status, body) = status_and_body(ApiError::Internal("db crash".into())).await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(body["error"], "An internal error occurred");
+        assert!(!body["error"].as_str().unwrap().contains("db crash"));
+    }
+
+    #[tokio::test]
+    async fn unauthorized_returns_401() {
+        let (status, body) = status_and_body(ApiError::Unauthorized).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(body["error"], "Unauthorized");
+    }
+
+    #[tokio::test]
+    async fn forbidden_returns_403() {
+        let (status, body) = status_and_body(ApiError::Forbidden).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["error"], "Forbidden");
+    }
+}

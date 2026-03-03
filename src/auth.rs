@@ -67,3 +67,65 @@ impl FromRequestParts<AppState> for Claims {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TEST_SECRET: &str = "test-secret-key-at-least-32-chars!!";
+
+    #[test]
+    fn create_and_validate_token_roundtrip() {
+        let user_id: i64 = 123456;
+        let token = create_token(user_id, TEST_SECRET, 60).unwrap();
+        let claims = validate_token(&token, TEST_SECRET).unwrap();
+        assert_eq!(claims.sub, user_id.to_string());
+    }
+
+    #[test]
+    fn validate_token_fails_with_wrong_secret() {
+        let token = create_token(1, TEST_SECRET, 60).unwrap();
+        let result = validate_token(&token, "wrong-secret-key-at-least-32-chars!!");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_token_fails_when_expired() {
+        // leeway (デフォルト60秒) を超えた過去の exp を直接設定
+        let past = chrono::Utc::now().timestamp() as u64 - 120;
+        let claims = Claims {
+            sub: "1".to_string(),
+            iat: past - 60,
+            exp: past,
+        };
+        let token = jsonwebtoken::encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(TEST_SECRET.as_ref()),
+        )
+        .unwrap();
+        let result = validate_token(&token, TEST_SECRET);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn claims_sub_is_string_representation_of_user_id() {
+        let user_id: i64 = 987654321;
+        let token = create_token(user_id, TEST_SECRET, 60).unwrap();
+        let claims = validate_token(&token, TEST_SECRET).unwrap();
+        assert_eq!(claims.sub.parse::<i64>().unwrap(), user_id);
+    }
+
+    #[test]
+    fn claims_iat_is_before_exp() {
+        let token = create_token(1, TEST_SECRET, 60).unwrap();
+        let claims = validate_token(&token, TEST_SECRET).unwrap();
+        assert!(claims.iat < claims.exp);
+    }
+
+    #[test]
+    fn validate_token_fails_with_garbage_input() {
+        let result = validate_token("not-a-jwt", TEST_SECRET);
+        assert!(result.is_err());
+    }
+}
