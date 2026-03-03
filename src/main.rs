@@ -9,7 +9,10 @@ mod validation;
 
 use axum::{
     Router,
-    http::Method,
+    http::{
+        Method,
+        header::{AUTHORIZATION, CONTENT_TYPE},
+    },
     routing::{get, post},
 };
 use dotenvy::dotenv;
@@ -21,7 +24,10 @@ use tracing_subscriber::{
     EnvFilter, layer::SubscriberExt, util::SubscriberInitExt,
 };
 
-use crate::{routes::users, state::AppState};
+use crate::{
+    routes::{auth as auth_routes, users},
+    state::AppState,
+};
 
 #[tokio::main]
 async fn main() {
@@ -37,20 +43,39 @@ async fn main() {
 
     let database_url =
         std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let jwt_secret =
+        std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
+    let access_token_expiry_minutes =
+        std::env::var("ACCESS_TOKEN_EXPIRY_MINUTES")
+            .expect("ACCESS_TOKEN_EXPIRY_MINUTES must be set")
+            .parse::<u64>()
+            .expect("ACCESS_TOKEN_EXPIRY_MINUTES could not parse u64");
+    let refresh_token_expiry_days = std::env::var("REFRESH_TOKEN_EXPIRY_DAYS")
+        .expect("REFRESH_TOKEN_EXPIRY_DAYS must be set")
+        .parse::<u64>()
+        .expect("REFRESH_TOKEN_EXPIRY_DAYS could not parse u64");
     let pool = db::create_pool(&database_url)
         .await
         .expect("Failed to connect to database");
 
-    let state = AppState::new(pool, 10);
+    let state = AppState::new(
+        pool,
+        10,
+        jwt_secret,
+        access_token_expiry_minutes,
+        refresh_token_expiry_days,
+    );
 
-    let cors = CorsLayer::new().allow_origin(Any).allow_methods([
-        Method::GET,
-        Method::POST,
-        Method::PUT,
-        Method::DELETE,
-    ]);
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
+        .allow_headers([AUTHORIZATION, CONTENT_TYPE]);
 
     let app = Router::new()
+        .route("/auth/register", post(auth_routes::register))
+        .route("/auth/login", post(auth_routes::login))
+        .route("/auth/refresh", post(auth_routes::refresh))
+        .route("/auth/logout", post(auth_routes::logout))
         .route("/users", get(users::list_users))
         .route(
             "/users/{id}",

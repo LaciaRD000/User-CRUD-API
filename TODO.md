@@ -30,7 +30,7 @@ DESIGN.md の実装ステップに基づくタスク管理。
 - [x] 21. `routes/auth.rs` — register, login, refresh, logout, issue_refresh_token 実装完了
 - [x] 22. `routes/mod.rs` — `pub mod auth;` 追加
 - [x] 23. `routes/users.rs` — create_user 削除済み, 認可チェック追加, `SELECT *` を明示的カラム指定に変更
-- [ ] 24. `main.rs` — JWT_SECRET 読み込み, AppState::new 引数追加, POST /users 削除済み, auth ルート追加, CORS に allow_headers 追加
+- [x] 24. `main.rs` — JWT_SECRET 読み込み, AppState::new 引数追加, POST /users 削除済み, auth ルート追加, CORS に allow_headers 追加
 
 ## コーディング規約の残タスク
 
