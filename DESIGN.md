@@ -372,10 +372,20 @@ pub use user::*;
 
 | 関数 | シグネチャ | 説明 |
 |------|-----------|------|
+| `issue_refresh_token` | `async fn issue_refresh_token(state: &AppState, user_id: i64) -> Result<String, ApiError>` | リフレッシュトークンを生成して DB に保存し、トークン文字列を返す（ヘルパー関数） |
 | `register` | `pub async fn register(State(state): State<AppState>, body: Json<RegisterUser>) -> Result<(StatusCode, Json<AuthResponse>), ApiError>` | 下記参照 |
 | `login` | `pub async fn login(State(state): State<AppState>, body: Json<LoginUser>) -> Result<Json<AuthResponse>, ApiError>` | 下記参照 |
 | `refresh` | `pub async fn refresh(State(state): State<AppState>, body: Json<RefreshRequest>) -> Result<Json<AuthResponse>, ApiError>` | 下記参照 |
 | `logout` | `pub async fn logout(State(state): State<AppState>, claims: Claims, body: Json<LogoutRequest>) -> Result<StatusCode, ApiError>` | 下記参照 |
+
+**`issue_refresh_token` の処理フロー**:
+1. `Uuid::new_v4().to_string()` でリフレッシュトークン生成
+2. `state.snowflake.lock().unwrap().generate()` で Snowflake ID 生成
+3. `Utc::now() + Duration::days(state.refresh_token_expiry_days)` で有効期限を計算
+4. `INSERT INTO refresh_tokens (id, user_id, token, expires_at) VALUES ($1, $2, $3, $4)` で DB に保存
+5. トークン文字列を返す
+
+> **ポイント**: `register`, `login`, `refresh` の3箇所で同じリフレッシュトークン発行処理を繰り返すため、ヘルパー関数に切り出して DRY にする。`pub` を付けない（ファイル内でのみ使用）。
 
 **`register` の処理フロー**:
 1. `validate_username`, `validate_email`, `validate_password` でバリデーション
@@ -383,9 +393,8 @@ pub use user::*;
 3. `state.snowflake.lock().unwrap().generate()` で Snowflake ID 生成
 4. `INSERT INTO users (id, username, email, password_hash) VALUES ($1, $2, $3, $4)` で DB に保存（`RETURNING` 不要 — レスポンスはトークンのみで、ID は生成済みの変数を使う）
 5. `create_token(id, &state.jwt_secret, expiry_minutes)` でアクセストークン発行
-6. `uuid::Uuid::new_v4().to_string()` でリフレッシュトークン生成
-7. `INSERT INTO refresh_tokens (id, user_id, token, expires_at) VALUES ($1, $2, $3, $4)` で DB に保存（id は Snowflake ID を新たに生成）
-8. `(StatusCode::CREATED, Json(AuthResponse { access_token, refresh_token }))` を返す
+6. `issue_refresh_token(&state, user_id)` でリフレッシュトークン発行
+7. `(StatusCode::CREATED, Json(AuthResponse { access_token, refresh_token }))` を返す
 
 **`login` の処理フロー**:
 1. `SELECT id, username, email, password_hash FROM users WHERE email = $1` で DB 検索
@@ -393,9 +402,8 @@ pub use user::*;
 3. `bcrypt::verify(&body.password, &password_hash)` でパスワード照合
 4. 不一致なら `ApiError::Unauthorized`
 5. `create_token(user.id, &state.jwt_secret, expiry_minutes)` でアクセストークン発行
-6. `uuid::Uuid::new_v4().to_string()` でリフレッシュトークン生成
-7. `INSERT INTO refresh_tokens (id, user_id, token, expires_at) VALUES ($1, $2, $3, $4)` で DB に保存（id は Snowflake ID を新たに生成）
-8. `Json(AuthResponse { access_token, refresh_token })` を返す
+6. `issue_refresh_token(&state, user.id)` でリフレッシュトークン発行
+7. `Json(AuthResponse { access_token, refresh_token })` を返す
 
 **`refresh` の処理フロー**:
 1. `SELECT id, user_id, token, expires_at FROM refresh_tokens WHERE token = $1` で DB 検索
@@ -403,9 +411,8 @@ pub use user::*;
 3. `expires_at < Utc::now()` なら期限切れ → 古いトークンを DELETE → `ApiError::Unauthorized`
 4. 古いリフレッシュトークンを DELETE（ローテーション）
 5. `create_token(user_id, &state.jwt_secret, expiry_minutes)` で新しいアクセストークン発行
-6. `uuid::Uuid::new_v4().to_string()` で新しいリフレッシュトークン生成
-7. `INSERT INTO refresh_tokens (id, user_id, token, expires_at) VALUES ($1, $2, $3, $4)` で DB に保存（id は Snowflake ID を新たに生成）
-8. `Json(AuthResponse { access_token, refresh_token })` を返す
+6. `issue_refresh_token(&state, user_id)` で新しいリフレッシュトークン発行
+7. `Json(AuthResponse { access_token, refresh_token })` を返す
 
 **`logout` の処理フロー**:
 1. `DELETE FROM refresh_tokens WHERE token = $1 AND user_id = $2` で DB から削除（`$2` は `claims.sub` をパースした `i64`）

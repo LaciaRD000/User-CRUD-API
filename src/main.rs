@@ -51,7 +51,7 @@ async fn main() {
     ]);
 
     let app = Router::new()
-        .route("/users", post(users::create_user).get(users::list_users))
+        .route("/users", get(users::list_users))
         .route(
             "/users/{id}",
             get(users::get_user)

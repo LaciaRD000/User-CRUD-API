@@ -6,33 +6,10 @@ use axum::{
 
 use crate::{
     errors::ApiError,
-    models::{CreateUser, UpdateUser, User},
+    models::{UpdateUser, User},
     state::AppState,
     validation::{validate_email, validate_username},
 };
-
-pub async fn create_user(
-    State(state): State<AppState>,
-    body: Json<CreateUser>,
-) -> Result<(StatusCode, Json<User>), ApiError> {
-    validate_username(&body.username)
-        .map_err(|err| ApiError::BadRequest(err))?;
-    validate_email(&body.email).map_err(|err| ApiError::BadRequest(err))?;
-
-    let snowflake = state.snowflake.lock().unwrap().generate();
-
-    let user = sqlx::query_as::<_, User>(
-        "INSERT INTO users (id, username, email) VALUES ($1, $2, $3) RETURNING *",
-    )
-    .bind(snowflake)
-    .bind(&body.username)
-    .bind(&body.email)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|err| ApiError::Internal(err.to_string()))?;
-
-    Ok((StatusCode::CREATED, Json(user)))
-}
 
 pub async fn list_users(
     State(state): State<AppState>,
