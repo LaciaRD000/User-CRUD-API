@@ -12,7 +12,9 @@ use crate::{
         RegisterUser, User,
     },
     state::AppState,
-    validation::{normalize_email, validate_email, validate_password, validate_username},
+    validation::{
+        normalize_email, validate_email, validate_password, validate_username,
+    },
 };
 
 const USERS_EMAIL_UNIQUE_CONSTRAINT: &str = "users_email_key";
@@ -67,12 +69,10 @@ pub async fn register(
     State(state): State<AppState>,
     body: Json<RegisterUser>,
 ) -> Result<(StatusCode, Json<AuthResponse>), ApiError> {
-    validate_username(&body.username)
-        .map_err(|err| ApiError::BadRequest(err))?;
+    validate_username(&body.username).map_err(ApiError::BadRequest)?;
     let email = normalize_email(&body.email);
-    validate_email(&email).map_err(|err| ApiError::BadRequest(err))?;
-    validate_password(&body.password)
-        .map_err(|err| ApiError::BadRequest(err))?;
+    validate_email(&email).map_err(ApiError::BadRequest)?;
+    validate_password(&body.password).map_err(ApiError::BadRequest)?;
 
     let password_hash = bcrypt::hash(&body.password, bcrypt::DEFAULT_COST)
         .map_err(|err| ApiError::Internal(err.to_string()))?;
@@ -89,13 +89,13 @@ pub async fn register(
     .execute(&state.db)
     .await
     .map_err(|err| {
-        if let Some(db_err) = err.as_database_error() {
-            if let Some(api_err) = map_unique_violation_to_conflict(
+        if let Some(db_err) = err.as_database_error()
+            && let Some(api_err) = map_unique_violation_to_conflict(
                 db_err.code().as_deref(),
                 db_err.constraint(),
-            ) {
-                return api_err;
-            }
+            )
+        {
+            return api_err;
         }
         ApiError::Internal(err.to_string())
     })?;
@@ -240,7 +240,7 @@ pub async fn logout(
         "DELETE FROM refresh_tokens WHERE token_hash = $1 AND user_id = $2",
     )
     .bind(&token_hash)
-    .bind(&user_id)
+    .bind(user_id)
     .execute(&state.db)
     .await
     .map_err(|err| ApiError::Internal(err.to_string()))?;
@@ -277,15 +277,19 @@ mod tests {
             ),
             Some(ApiError::Conflict(_))
         ));
-        assert!(map_unique_violation_to_conflict(
-            Some("23505"),
-            Some("other_unique")
-        )
-        .is_none());
-        assert!(map_unique_violation_to_conflict(
-            Some("99999"),
-            Some(USERS_EMAIL_UNIQUE_CONSTRAINT)
-        )
-        .is_none());
+        assert!(
+            map_unique_violation_to_conflict(
+                Some("23505"),
+                Some("other_unique")
+            )
+            .is_none()
+        );
+        assert!(
+            map_unique_violation_to_conflict(
+                Some("99999"),
+                Some(USERS_EMAIL_UNIQUE_CONSTRAINT)
+            )
+            .is_none()
+        );
     }
 }

@@ -67,7 +67,7 @@ DESIGN.md の実装ステップに基づくタスク管理。
 - [x] 30. `.env` — `SNOWFLAKE_MACHINE_ID` を必須化（未設定/不正なら起動失敗）
 - [x] 31. `.env` — `REFRESH_TOKEN_PEPPER` を追加し、リフレッシュトークンハッシュを `HMAC-SHA256` 化
 - [x] 32. `.env` — `JWT_ISSUER` / `JWT_AUDIENCE` を追加し、JWT の発行/検証で `iss` / `aud` を必須化
-- [x] 33. レート制限 — `SmartIpKeyExtractor` に切り替え（`Forwarded`/`X-Forwarded-For`/`X-Real-Ip` 優先）
+- [x] 33. レート制限 — IPキー抽出を `RATE_LIMIT_IP_MODE` で切替（既定 `peer`、必要な環境のみ `smart` で `Forwarded`/`X-Forwarded-For`/`X-Real-Ip` を利用）
 - [x] 34. 重複email登録 — UNIQUE違反を `users_email_key` のみ 409 Conflict にマッピング
 
 ## Phase 8: セキュリティ改善（これから）
@@ -75,3 +75,27 @@ DESIGN.md の実装ステップに基づくタスク管理。
 - [x] 35. email 正規化（`trim` + `lowercase`）とDB側の case-insensitive UNIQUE（`citext` または `unique(lower(email))`）
 - [x] 36. login のタイミング差対策（email不存在でも bcrypt verify を走らせる）
 - [x] 37. JWT 検証の追加強化（`JWT_LEEWAY_SECONDS`/必須claim/`JWT_SECRET` 長チェックの明示）
+
+## Phase 9: 設計と実装の整合（これから）
+
+- [x] 38. `DESIGN.md` — `AppState` のフィールドと環境変数の説明を現行実装に合わせて更新（jwt issuer/audience/leeway、refresh_token_pepper、dummy bcrypt hash 等）
+- [x] 39. `DESIGN.md` — email の一意制約を `unique(lower(email))` 前提に整理（`email UNIQUE` を残すか、削除するか、移行手順を明記）
+
+## Phase 10: 高リスク項目（これから）
+
+- [x] 40. レート制限 — `SmartIpKeyExtractor` の信頼境界を明確化（直アクセス時は peer IP を使う等、ENVで切替）
+- [x] 40a. `.env`/環境変数に `RATE_LIMIT_IP_MODE` を追加（例: `peer` / `smart`。既定は `peer`）
+- [x] 40b. 実装: governor の `key_extractor` を「単一の型」で差し替えできるようにする（ランタイム切替できるカスタムKeyExtractorを作る）
+- [x] 40c. `RATE_LIMIT_IP_MODE=peer` のときは `ConnectInfo` から peer IP のみを使う（ヘッダーは一切信頼しない）
+- [x] 40d. `RATE_LIMIT_IP_MODE=smart` のときのみ `Forwarded` / `X-Forwarded-For` / `X-Real-Ip` を参照する（前段プロキシが信頼できる前提を明記）
+- [x] 40e. テスト: `peer`/`smart` それぞれの抽出結果（ヘッダー有無・不正値・複数値）をユニットテストで固定する
+- [x] 40f. ドキュメント: `DESIGN.md` と `README.md` に `RATE_LIMIT_IP_MODE` と運用上の注意（直アクセス環境で `smart` にしない等）を追記
+- [x] 42. JWT — `iat` の妥当性チェック（未来すぎるトークン拒否など、要件に応じて）
+
+## Phase 11: 運用・品質改善（提案）
+
+- [x] DB スキーマの再現性を強化（`sqlx` migrations 追加、または `schema.sql` + README 手順を固定）
+- [x] ユーザー情報公開範囲の見直し（`GET /users`・`GET /users/{id}` の認証要否、email を返すべきか、最小化）
+- [x] `PUT /users/{id}` の email 重複を `409 Conflict` にマップ（UNIQUE違反のハンドリングを register と揃える）
+- [x] `cargo fmt --check` を成立させる（`rustfmt.toml` を stable 互換にする or nightly rustfmt 前提を明確化）
+- [x] 結合テストのスキップ挙動を見直し（環境変数未設定時に「成功としてスキップ」ではなく、CI で検知できる形に）

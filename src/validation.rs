@@ -93,10 +93,7 @@ mod tests {
 
     #[test]
     fn normalize_email_trims_and_lowercases() {
-        assert_eq!(
-            normalize_email("  User@Example.COM  "),
-            "user@example.com"
-        );
+        assert_eq!(normalize_email("  User@Example.COM  "), "user@example.com");
     }
 
     // --- validate_password ---

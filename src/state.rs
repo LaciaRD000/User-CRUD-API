@@ -19,6 +19,7 @@ pub struct AppState {
 }
 
 impl AppState {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         pool: PgPool,
         machine_id: u16,

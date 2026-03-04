@@ -210,6 +210,14 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          description: 既に登録済み
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error: email already exists
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -322,10 +330,6 @@ components:
         username:
           type: string
           example: taro
-        email:
-          type: string
-          format: email
-          example: taro@example.com
 
     UpdateUser:
       type: object

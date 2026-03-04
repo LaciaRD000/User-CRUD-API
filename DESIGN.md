@@ -13,6 +13,7 @@ src/
 ├── main.rs              # エントリーポイント
 ├── auth.rs              # JWT コアロジック + カスタム Extractor
 ├── db.rs                # データベース接続の初期化
+├── rate_limit.rs        # レート制限のキー(IP)抽出
 ├── state.rs             # アプリケーション共有状態
 ├── snowflake.rs         # Snowflake ID 生成器
 ├── errors.rs            # エラー型の定義
@@ -38,6 +39,7 @@ ACCESS_TOKEN_EXPIRY_MINUTES=60
 REFRESH_TOKEN_EXPIRY_DAYS=7
 REFRESH_TOKEN_PEPPER=32文字以上のランダム文字列
 SNOWFLAKE_MACHINE_ID=10
+RATE_LIMIT_IP_MODE=peer
 ```
 
 ---
@@ -53,6 +55,7 @@ SNOWFLAKE_MACHINE_ID=10
 - `mod db;`
 - `mod errors;`
 - `mod models;`
+- `mod rate_limit;`
 - `mod routes;`
 - `mod snowflake;`
 - `mod state;`
@@ -62,7 +65,7 @@ SNOWFLAKE_MACHINE_ID=10
 
 | 関数 | シグネチャ | 説明 |
 |------|-----------|------|
-| `main` | `#[tokio::main] async fn main()` | .env 読み込み → `tracing_subscriber::registry()` + `EnvFilter` + `fmt::layer()` で tracing 初期化 → DB接続プール作成 → JWT_SECRET 読み込み → AppState 生成 → レートリミット・CORS・トレースレイヤー設定 → Router にルート登録 → `0.0.0.0:3000` で起動 |
+| `main` | `#[tokio::main] async fn main()` | .env 読み込み → `tracing_subscriber::registry()` + `EnvFilter` + `fmt::layer()` で tracing 初期化 → 環境変数（DB/JWT/トークン期限/レート制限モード等）読み込み → DB接続プール作成 → AppState 生成 → レートリミット・CORS・トレースレイヤー設定 → Router にルート登録 → `0.0.0.0:3000` で起動 |
 
 **ルート定義**:
 
@@ -78,7 +81,7 @@ SNOWFLAKE_MACHINE_ID=10
 | DELETE | `/users/{id}` | `users::delete_user` | **必要 + 本人のみ** |
 
 **ミドルウェア**:
-- `GovernorLayer` — IP ベースのレートリミット。ルートグループごとに異なる設定を適用する。超過時は `429 Too Many Requests` を返す。キー抽出は `SmartIpKeyExtractor` を使用し、`Forwarded` / `X-Forwarded-For` / `X-Real-Ip` を優先してクライアントIPを解決し、無ければ peer IP にフォールバックする（これらのヘッダーは信頼できるリバースプロキシ経由でのみ利用する前提）
+- `GovernorLayer` — IP ベースのレートリミット。ルートグループごとに異なる設定を適用する。超過時は `429 Too Many Requests` を返す。キー抽出は `RATE_LIMIT_IP_MODE` で切替する。`peer` (既定) は peer IP のみを使い、`Forwarded`/`X-Forwarded-For` 等を一切信頼しない。`smart` は `Forwarded` / `X-Forwarded-For` / `X-Real-Ip` を優先し、無ければ peer IP にフォールバックする（信頼できるリバースプロキシ配下でのみ利用）。
 - `TraceLayer` — 全リクエスト/レスポンスを自動ログ出力
 - `CorsLayer` — 全オリジン許可、GET/POST/PUT/DELETE メソッド許可、`Authorization` / `Content-Type` ヘッダー許可
 - `CompressionLayer` — レスポンスの gzip 圧縮
@@ -97,16 +100,27 @@ SNOWFLAKE_MACHINE_ID=10
 - ルートグループごとに別の `GovernorConfig` を作成し、それぞれの `Router` に `.layer()` で適用してから `merge` で合流する
 
 ```rust
+// RATE_LIMIT_IP_MODE (peer/smart) でキー抽出を切替
+let rate_limit_ip_mode = std::env::var("RATE_LIMIT_IP_MODE")
+    .ok()
+    .map(|s| {
+        RateLimitIpMode::parse(&s).unwrap_or_else(|| {
+            panic!("RATE_LIMIT_IP_MODE must be one of: peer, smart (got: {s})")
+        })
+    })
+    .unwrap_or(RateLimitIpMode::Peer);
+let key_extractor = RateLimitIpKeyExtractor::new(rate_limit_ip_mode);
+
 // レートリミット設定
 let auth_governor = GovernorConfigBuilder::default()
-    .key_extractor(SmartIpKeyExtractor)
+    .key_extractor(key_extractor.clone())
     .per_second(1)
     .burst_size(5)
     .finish()
     .unwrap();
 
 let user_governor = GovernorConfigBuilder::default()
-    .key_extractor(SmartIpKeyExtractor)
+    .key_extractor(key_extractor)
     .per_second(10)
     .burst_size(50)
     .finish()
@@ -171,6 +185,8 @@ let app: NormalizePath<Router> =
 ```
 Claims (Serialize, Deserialize)
 ├── sub : String — ユーザーID (subject)。RFC 7519 に準拠し文字列型。生成時に i64 → String 変換
+├── iss : String — issuer（発行者）。検証時に一致必須
+├── aud : String — audience（受信者）。検証時に一致必須
 ├── exp : u64    — 有効期限 (UNIX タイムスタンプ、秒)
 └── iat : u64    — 発行時刻 (UNIX タイムスタンプ、秒)
 ```
@@ -179,8 +195,8 @@ Claims (Serialize, Deserialize)
 
 | 関数 | シグネチャ | 説明 |
 |------|-----------|------|
-| `create_token` | `pub fn create_token(user_id: i64, secret: &str, expiry_minutes: u64) -> Result<String, jsonwebtoken::errors::Error>` | `user_id.to_string()` で sub を生成 → Claims を組み立て → `jsonwebtoken::encode` で HS256 署名付きトークンを生成して返す |
-| `validate_token` | `pub fn validate_token(token: &str, secret: &str) -> Result<Claims, jsonwebtoken::errors::Error>` | `jsonwebtoken::decode` でトークンを検証・デコードして Claims を返す。**許可アルゴリズムは HS256 のみに固定**する。期限切れ・署名不正はエラー |
+| `create_token` | `pub fn create_token(user_id: i64, secret: &str, issuer: &str, audience: &str, expiry_minutes: u64) -> Result<String, jsonwebtoken::errors::Error>` | `user_id.to_string()` で sub を生成 → `iss`/`aud`/`iat`/`exp` を含む Claims を組み立て → `jsonwebtoken::encode` で **HS256** 署名付きトークンを生成して返す |
+| `validate_token` | `pub fn validate_token(token: &str, secret: &str, issuer: &str, audience: &str, leeway_seconds: u64) -> Result<Claims, jsonwebtoken::errors::Error>` | `jsonwebtoken::decode` でトークンを検証・デコードして Claims を返す。**許可アルゴリズムは HS256 のみに固定**し、`iss`/`aud`/`sub`/`exp`/`iat` を必須化する。追加で `iat` が現在時刻より大きく未来（`leeway` を超える）なら拒否する |
 
 **トレイト実装**:
 
@@ -191,8 +207,8 @@ Claims (Serialize, Deserialize)
 **`FromRequestParts` の処理フロー**:
 1. `parts.headers` から `Authorization` ヘッダーを取得
 2. `"Bearer "` プレフィックスを除去してトークン文字列を取り出す
-3. `parts.state` (= `&AppState`) から `jwt_secret` を取得
-4. `validate_token(token, secret)` を呼ぶ
+3. `state` (= `&AppState`) から `jwt_secret` / `jwt_issuer` / `jwt_audience` / `jwt_leeway_seconds` を取得
+4. `validate_token(token, secret, issuer, audience, leeway_seconds)` を呼ぶ
 5. 成功 → `Ok(claims)`
 6. 失敗 → `tracing::warn!` でエラー種別をサーバーログに記録 → クライアントには一律 `Err(ApiError::Unauthorized)` を返す
 
@@ -215,13 +231,13 @@ Claims (Serialize, Deserialize)
 **テーブル定義** (Supabase の SQL Editor で実行):
 
 ```sql
-CREATE TABLE users (
-    id            BIGINT PRIMARY KEY,
-    username      TEXT NOT NULL,
-    email         TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL DEFAULT '',
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+	CREATE TABLE users (
+	    id            BIGINT PRIMARY KEY,
+	    username      TEXT NOT NULL,
+	    email         TEXT NOT NULL,
+	    password_hash TEXT NOT NULL DEFAULT '',
+	    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+	);
 
 CREATE TABLE refresh_tokens (
     id         BIGINT PRIMARY KEY,
@@ -234,7 +250,7 @@ CREATE TABLE refresh_tokens (
 
 - `id` は `BIGINT` (= i64) — Snowflake ID を格納
 - AUTO INCREMENT は使わない（アプリ側で Snowflake 採番するため）
-- `email` に `UNIQUE` 制約 — 同じメールアドレスで重複登録を防ぐ
+- `email` はアプリ側で正規化して保存し、DB側の `unique(lower(email))` で重複登録を防ぐ
 - `password_hash` — bcrypt でハッシュ化したパスワードを格納
 - `created_at` — レコード作成日時を自動記録
 - `refresh_tokens.token_hash` — リフレッシュトークンのハッシュ値。`UNIQUE` 制約で一意性を保証
@@ -246,14 +262,18 @@ CREATE TABLE refresh_tokens (
 
 ```sql
 -- case-insensitive UNIQUE (Option 2)
-CREATE UNIQUE INDEX users_email_lower_key ON users (lower(email));
+-- 既存の email UNIQUE を使っていた場合は制約を落とす（任意）
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_key;
+
+-- 既存データに大小だけ違う重複が無いことを確認してから作成する
+CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_key ON users (lower(email));
 ```
 
 ---
 
 ### `state.rs` — アプリケーション共有状態
 
-**役割**: DB接続プール、Snowflake 生成器、JWT シークレット、トークン有効期限を全ハンドラーで共有する
+**役割**: DB接続プール、Snowflake 生成器、JWT 設定、トークン有効期限、認証用の補助データを全ハンドラーで共有する
 
 **構造体**:
 
@@ -262,8 +282,13 @@ AppState (Clone)
 ├── db                          : PgPool                          — DB 接続プール
 ├── snowflake                   : Arc<Mutex<SnowflakeGenerator>>  — ID 生成器
 ├── jwt_secret                  : String                          — JWT 署名用シークレット
+├── jwt_issuer                  : String                          — JWT issuer
+├── jwt_audience                : String                          — JWT audience
+├── jwt_leeway_seconds          : u64                             — JWT 検証の leeway（秒）
 ├── access_token_expiry_minutes : u64                             — アクセストークン有効期限（分）
-└── refresh_token_expiry_days   : u64                             — リフレッシュトークン有効期限（日）
+├── refresh_token_expiry_days   : u64                             — リフレッシュトークン有効期限（日）
+├── refresh_token_pepper        : String                          — リフレッシュトークンHMAC用のペッパー
+└── dummy_password_hash         : String                          — login のタイミング差対策用ダミー bcrypt ハッシュ
 ```
 
 - `PgPool` — 内部で `Arc` を持っているので `Clone` するだけで共有できる
@@ -274,7 +299,7 @@ AppState (Clone)
 
 | 関数 | シグネチャ | 説明 |
 |------|-----------|------|
-| `AppState::new` | `pub fn new(pool: PgPool, machine_id: u16, jwt_secret: String, access_token_expiry_minutes: u64, refresh_token_expiry_days: u64) -> Self` | DB プール、SnowflakeGenerator、JWT シークレット、トークン有効期限を受け取って初期化する |
+| `AppState::new` | `pub fn new(pool: PgPool, machine_id: u16, jwt_secret: String, jwt_issuer: String, jwt_audience: String, jwt_leeway_seconds: u64, access_token_expiry_minutes: u64, refresh_token_expiry_days: u64, refresh_token_pepper: String, dummy_password_hash: String) -> Self` | DB プール、SnowflakeGenerator、JWT 設定、トークン有効期限、認証用の補助データを受け取って初期化する |
 
 ---
 
@@ -477,7 +502,7 @@ pub use user::*;
 2. `bcrypt::hash(&body.password, DEFAULT_COST)` でパスワードをハッシュ化
 3. `state.snowflake.lock().unwrap().generate()` で Snowflake ID 生成
 4. `INSERT INTO users (id, username, email, password_hash) VALUES ($1, $2, $3, $4)` で DB に保存（`RETURNING` 不要 — レスポンスはトークンのみで、ID は生成済みの変数を使う）
-5. `create_token(id, &state.jwt_secret, expiry_minutes)` でアクセストークン発行
+5. `create_token(id, &state.jwt_secret, &state.jwt_issuer, &state.jwt_audience, expiry_minutes)` でアクセストークン発行
 6. `issue_refresh_token(&state, user_id)` でリフレッシュトークン発行
 7. `(StatusCode::CREATED, Json(AuthResponse { access_token, refresh_token }))` を返す
 
@@ -487,7 +512,7 @@ pub use user::*;
 3. `bcrypt::verify(&body.password, &password_hash)` でパスワード照合
 4. 不一致なら `ApiError::Unauthorized`
 5. `DELETE FROM refresh_tokens WHERE user_id = $1` で既存リフレッシュトークンを全削除（古いセッションを無効化）
-6. `create_token(user.id, &state.jwt_secret, expiry_minutes)` でアクセストークン発行
+6. `create_token(user.id, &state.jwt_secret, &state.jwt_issuer, &state.jwt_audience, expiry_minutes)` でアクセストークン発行
 7. `issue_refresh_token(&state, user.id)` でリフレッシュトークン発行
 8. `Json(AuthResponse { access_token, refresh_token })` を返す
 
@@ -498,7 +523,7 @@ pub use user::*;
 4. 見つからなければ `ApiError::Unauthorized`
 5. `expires_at < Utc::now()` なら期限切れ → 古いトークンを DELETE → `ApiError::Unauthorized`
 6. 古いリフレッシュトークンを DELETE（ローテーション）
-7. `create_token(user_id, &state.jwt_secret, expiry_minutes)` で新しいアクセストークン発行
+7. `create_token(user_id, &state.jwt_secret, &state.jwt_issuer, &state.jwt_audience, expiry_minutes)` で新しいアクセストークン発行
 8. `issue_refresh_token(&state, user_id)` で新しいリフレッシュトークン発行
 9. `Json(AuthResponse { access_token, refresh_token })` を返す
 

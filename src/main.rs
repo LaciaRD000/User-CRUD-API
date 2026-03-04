@@ -1,12 +1,3 @@
-mod auth;
-mod db;
-mod errors;
-mod models;
-mod routes;
-mod snowflake;
-mod state;
-mod validation;
-
 use std::{net::SocketAddr, time::Duration};
 
 use axum::{
@@ -20,11 +11,7 @@ use axum::{
 };
 use dotenvy::dotenv;
 use tower::{Layer, ServiceBuilder};
-use tower_governor::{
-    GovernorLayer,
-    governor::GovernorConfigBuilder,
-    key_extractor::SmartIpKeyExtractor,
-};
+use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder};
 use tower_helmet::HelmetLayer;
 use tower_http::{
     compression::CompressionLayer,
@@ -36,8 +23,9 @@ use tower_http::{
 use tracing_subscriber::{
     EnvFilter, layer::SubscriberExt, util::SubscriberInitExt,
 };
-
-use crate::{
+use user_api::{
+    db,
+    rate_limit::{RateLimitIpKeyExtractor, RateLimitIpMode},
     routes::{auth as auth_routes, users},
     state::AppState,
 };
@@ -80,15 +68,23 @@ async fn main() {
         .expect("REFRESH_TOKEN_EXPIRY_DAYS could not parse u64");
     let refresh_token_pepper = std::env::var("REFRESH_TOKEN_PEPPER")
         .expect("REFRESH_TOKEN_PEPPER must be set");
+    let rate_limit_ip_mode = std::env::var("RATE_LIMIT_IP_MODE")
+        .ok()
+        .map(|s| {
+            RateLimitIpMode::parse(&s).unwrap_or_else(|| {
+                panic!(
+                    "RATE_LIMIT_IP_MODE must be one of: peer, smart (got: {s})"
+                )
+            })
+        })
+        .unwrap_or(RateLimitIpMode::Peer);
     let snowflake_machine_id = std::env::var("SNOWFLAKE_MACHINE_ID")
         .expect("SNOWFLAKE_MACHINE_ID must be set")
         .parse::<u16>()
         .expect("SNOWFLAKE_MACHINE_ID could not parse u16");
-    let dummy_password_hash = bcrypt::hash(
-        "dummy-password-not-a-secret",
-        bcrypt::DEFAULT_COST,
-    )
-    .expect("Failed to generate dummy bcrypt hash");
+    let dummy_password_hash =
+        bcrypt::hash("dummy-password-not-a-secret", bcrypt::DEFAULT_COST)
+            .expect("Failed to generate dummy bcrypt hash");
     let pool = db::create_pool(&database_url)
         .await
         .expect("Failed to connect to database");
@@ -111,15 +107,17 @@ async fn main() {
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
         .allow_headers([AUTHORIZATION, CONTENT_TYPE]);
 
+    let key_extractor = RateLimitIpKeyExtractor::new(rate_limit_ip_mode);
+
     let auth_governor = GovernorConfigBuilder::default()
-        .key_extractor(SmartIpKeyExtractor)
+        .key_extractor(key_extractor)
         .per_second(1)
         .burst_size(5)
         .finish()
         .unwrap();
 
     let user_governor = GovernorConfigBuilder::default()
-        .key_extractor(SmartIpKeyExtractor)
+        .key_extractor(key_extractor)
         .per_second(10)
         .burst_size(50)
         .finish()

@@ -26,6 +26,20 @@ Rust 製のユーザー管理 REST API。Axum + Tokio で構築し、Supabase (P
 - Rust (Edition 2024)
 - PostgreSQL (Supabase)
 
+> Note: `rustfmt.toml` で unstable な rustfmt オプションを使っているため、
+> フォーマットは nightly toolchain 前提（このリポジトリは `rust-toolchain.toml` で nightly を指定）です。
+
+### DB マイグレーション（推奨）
+
+このリポジトリは `migrations/` にスキーマを同梱している。
+
+`sqlx-cli` を使う場合:
+
+```bash
+cargo install sqlx-cli --no-default-features --features postgres
+sqlx migrate run
+```
+
 ### 手順
 
 1. リポジトリをクローン
@@ -47,6 +61,7 @@ ACCESS_TOKEN_EXPIRY_MINUTES=60
 REFRESH_TOKEN_EXPIRY_DAYS=7
 REFRESH_TOKEN_PEPPER=32文字以上のランダム文字列
 SNOWFLAKE_MACHINE_ID=10
+RATE_LIMIT_IP_MODE=peer
 RUST_LOG=info
 ```
 

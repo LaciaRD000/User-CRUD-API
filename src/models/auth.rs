@@ -33,8 +33,10 @@ pub struct LogoutRequest {
 
 #[derive(FromRow)]
 pub struct RefreshToken {
+    #[allow(dead_code)]
     pub id: i64,
     pub user_id: i64,
+    #[allow(dead_code)]
     pub token_hash: String,
     pub expires_at: DateTime<Utc>,
 }

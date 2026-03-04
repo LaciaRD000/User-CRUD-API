@@ -53,8 +53,9 @@ impl IntoResponse for ApiError {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use axum::body::to_bytes;
+
+    use super::*;
 
     async fn status_and_body(
         error: ApiError,

@@ -20,7 +20,7 @@
 - 同一クレートからの複数インポートはネストしてまとめる
 
 ## フォーマット
-- `rustfmt` に従う
+- `rustfmt` に従う（`rustfmt.toml` の unstable オプションのため nightly toolchain 前提）
 - 関数の引数が多い場合は引数ごとに改行する
 
 ## 型アノテーション

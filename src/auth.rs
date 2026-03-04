@@ -2,7 +2,10 @@ use std::time::Duration;
 
 use axum::extract::FromRequestParts;
 use chrono::{DateTime, Utc};
-use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{
+    Algorithm, DecodingKey, EncodingKey, Header, Validation,
+    errors::{ErrorKind, new_error},
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{errors::ApiError, state::AppState};
@@ -51,12 +54,23 @@ pub fn validate_token(
     validation.leeway = leeway_seconds;
     validation.set_issuer(&[issuer]);
     validation.set_audience(&[audience]);
-    validation.set_required_spec_claims(&["exp", "iss", "aud", "sub"]);
+    validation.set_required_spec_claims(&["exp", "iss", "aud", "sub", "iat"]);
     let claims = jsonwebtoken::decode::<Claims>(
         token,
         &DecodingKey::from_secret(secret.as_ref()),
         &validation,
     )?;
+
+    // Reject tokens with iat far in the future. Use the same leeway as exp
+    // validation.
+    let now = Utc::now().timestamp();
+    let allowed_future = now.saturating_add(leeway_seconds as i64);
+    let iat = i64::try_from(claims.claims.iat)
+        .map_err(|_| new_error(ErrorKind::InvalidClaimFormat("iat".into())))?;
+    if iat > allowed_future {
+        return Err(new_error(ErrorKind::InvalidToken));
+    }
+
     Ok(claims.claims)
 }
 
@@ -118,16 +132,16 @@ mod tests {
 
     #[test]
     fn validate_token_fails_with_wrong_secret() {
-        let token = create_token(1, TEST_SECRET, TEST_ISSUER, TEST_AUDIENCE, 60)
-            .unwrap();
-        let result =
-            validate_token(
-                &token,
-                "wrong-secret-key-at-least-32-chars!!",
-                TEST_ISSUER,
-                TEST_AUDIENCE,
-                TEST_LEEWAY_SECONDS,
-            );
+        let token =
+            create_token(1, TEST_SECRET, TEST_ISSUER, TEST_AUDIENCE, 60)
+                .unwrap();
+        let result = validate_token(
+            &token,
+            "wrong-secret-key-at-least-32-chars!!",
+            TEST_ISSUER,
+            TEST_AUDIENCE,
+            TEST_LEEWAY_SECONDS,
+        );
         assert!(result.is_err());
     }
 
@@ -208,14 +222,13 @@ mod tests {
         let token =
             create_token(1, TEST_SECRET, TEST_ISSUER, TEST_AUDIENCE, 60)
                 .unwrap();
-        let result =
-            validate_token(
-                &token,
-                TEST_SECRET,
-                "wrong-issuer",
-                TEST_AUDIENCE,
-                TEST_LEEWAY_SECONDS,
-            );
+        let result = validate_token(
+            &token,
+            TEST_SECRET,
+            "wrong-issuer",
+            TEST_AUDIENCE,
+            TEST_LEEWAY_SECONDS,
+        );
         assert!(result.is_err());
     }
 
@@ -224,14 +237,90 @@ mod tests {
         let token =
             create_token(1, TEST_SECRET, TEST_ISSUER, TEST_AUDIENCE, 60)
                 .unwrap();
-        let result =
-            validate_token(
-                &token,
-                TEST_SECRET,
-                TEST_ISSUER,
-                "wrong-audience",
-                TEST_LEEWAY_SECONDS,
-            );
+        let result = validate_token(
+            &token,
+            TEST_SECRET,
+            TEST_ISSUER,
+            "wrong-audience",
+            TEST_LEEWAY_SECONDS,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_token_fails_when_iat_is_far_in_the_future() {
+        let now = chrono::Utc::now().timestamp() as u64;
+        let claims = Claims {
+            sub: "1".to_string(),
+            iss: TEST_ISSUER.to_string(),
+            aud: TEST_AUDIENCE.to_string(),
+            iat: now + 5,
+            exp: now + 60,
+        };
+        let token = jsonwebtoken::encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(TEST_SECRET.as_ref()),
+        )
+        .unwrap();
+
+        let result = validate_token(
+            &token,
+            TEST_SECRET,
+            TEST_ISSUER,
+            TEST_AUDIENCE,
+            0, // no leeway
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_token_allows_small_future_iat_within_leeway() {
+        let now = chrono::Utc::now().timestamp() as u64;
+        let claims = Claims {
+            sub: "1".to_string(),
+            iss: TEST_ISSUER.to_string(),
+            aud: TEST_AUDIENCE.to_string(),
+            iat: now + 30,
+            exp: now + 60,
+        };
+        let token = jsonwebtoken::encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(TEST_SECRET.as_ref()),
+        )
+        .unwrap();
+
+        let claims =
+            validate_token(&token, TEST_SECRET, TEST_ISSUER, TEST_AUDIENCE, 60)
+                .unwrap();
+        assert_eq!(claims.sub, "1");
+    }
+
+    #[test]
+    fn validate_token_fails_when_iat_is_too_large_to_represent_as_i64() {
+        let now = chrono::Utc::now().timestamp() as u64;
+        let claims = Claims {
+            sub: "1".to_string(),
+            iss: TEST_ISSUER.to_string(),
+            aud: TEST_AUDIENCE.to_string(),
+            iat: u64::MAX,
+            exp: now + 60,
+        };
+        let token = jsonwebtoken::encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(TEST_SECRET.as_ref()),
+        )
+        .unwrap();
+
+        let result = validate_token(
+            &token,
+            TEST_SECRET,
+            TEST_ISSUER,
+            TEST_AUDIENCE,
+            TEST_LEEWAY_SECONDS,
+        );
         assert!(result.is_err());
     }
 }
