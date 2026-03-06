@@ -99,3 +99,12 @@ DESIGN.md の実装ステップに基づくタスク管理。
 - [x] `PUT /users/{id}` の email 重複を `409 Conflict` にマップ（UNIQUE違反のハンドリングを register と揃える）
 - [x] `cargo fmt --check` を成立させる（`rustfmt.toml` を stable 互換にする or nightly rustfmt 前提を明確化）
 - [x] 結合テストのスキップ挙動を見直し（環境変数未設定時に「成功としてスキップ」ではなく、CI で検知できる形に）
+
+## Phase 12: リファクタリング・運用強化（実施済み）
+
+- [x] 43. `config.rs` — 環境変数の読み込みを `Config` 構造体に集約（`main.rs` の簡素化）
+- [x] 44. Graceful Shutdown — Ctrl+C (SIGINT) / SIGTERM で進行中リクエスト完了後に終了
+- [x] 45. Snowflake 時刻巻き戻り検出 — `last_timestamp` より過去の場合に panic（ID 一意性の保護）
+- [x] 46. 構造化ログ — 重要アクション（登録/ログイン/削除等）の INFO ログ、認証失敗の WARN ログ
+- [x] 47. リクエスト ID トレーサビリティ — `TraceLayer` のスパンに `x-request-id` を記録
+- [x] 48. `DESIGN.md` — sqlx エラーハンドリング方針、ログ方針、テスト方針、config.rs セクション等を追加
