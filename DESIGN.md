@@ -919,51 +919,75 @@ TestApp
 
 ## 実装の順番（おすすめ）
 
-### Phase 1: CRUD API
+> RGBC サイクル（Red → Green → Blue → Commit）を厳守すること。各ステップで対応するユニットテストを先に書き、通してからコミットする。
 
-1. **Supabase** — プロジェクト作成、`users` テーブルを SQL Editor で作成、接続文字列を控える
-2. **`Cargo.toml`** — 依存クレートを追加する
-3. **`.env`** — `DATABASE_URL` を設定する
-4. **`models/user.rs`** と **`models/mod.rs`** — データ型を定義する (`FromRow` derive を含む)
-5. **`snowflake.rs`** — Snowflake ID 生成器を作る
-6. **`db.rs`** — DB 接続プールを作る
-7. **`state.rs`** — 状態管理を作る（PgPool + SnowflakeGenerator）
-8. **`errors.rs`** — エラー型を作る（Internal バリアント追加）
-9. **`validation.rs`** — バリデーション関数を作る
-10. **`routes/users.rs`** と **`routes/mod.rs`** — ハンドラーを実装する（SQL クエリを使用）
-11. **`main.rs`** — 全部をつなげ、.env 読み込み・CORS・トレースレイヤーを組み込んで起動する
+### Phase 1: プロジェクト基盤
 
-### Phase 2: JWT 認証 + 認可 + リフレッシュトークン
+1. **Supabase** — プロジェクト作成、接続文字列を控える
+2. **`Cargo.toml`** — 基本の依存クレートを追加（`axum`, `tokio`, `serde`, `serde_json`, `sqlx`, `dotenvy`, `tracing`, `tracing-subscriber`）
+3. **`.env`** — `DATABASE_URL` を設定する（`.gitignore` に追加）
+4. **`db.rs`** — `create_pool` 関数を作る（接続文字列を引数で受け取り `PgPool` を返す）
+5. **`snowflake.rs`** — Snowflake ID 生成器を作る（時刻巻き戻り検出 panic を含む）。テスト: 正値・一意性・単調増加・machine_id 分離・巻き戻り panic
+6. **`errors.rs`** — `ApiError` enum を作る（`NotFound`, `BadRequest`, `Internal`）。テスト: 各バリアントのステータスコード・JSON ボディ
+7. **`validation.rs`** — `validate_username`, `validate_email` を作る。テスト: 正常系・異常系・境界値
 
-12. **Supabase** — `ALTER TABLE users ADD COLUMN password_hash TEXT NOT NULL DEFAULT '';` + `CREATE TABLE refresh_tokens (...)`
-13. **`Cargo.toml`** — `jsonwebtoken`, `bcrypt`, `chrono`, `uuid` を追加。`sqlx` の features に `chrono` を追加
-14. **`.env`** — `JWT_SECRET`, `ACCESS_TOKEN_EXPIRY_MINUTES`, `REFRESH_TOKEN_EXPIRY_DAYS` を追加
-15. **`models/user.rs`** — `password_hash` に `#[sqlx(default)]` 追加、`RegisterUser`, `LoginUser`, `AuthResponse`（`access_token` + `refresh_token`）, `RefreshRequest`, `LogoutRequest` 追加、`CreateUser` 削除
-16. **`models/mod.rs`** — 再エクスポート更新（`CreateUser` 削除、`RefreshRequest`, `LogoutRequest` 追加）
-17. **`errors.rs`** — `Unauthorized` + `Forbidden` バリアント追加
-18. **`validation.rs`** — `validate_password` 追加
-19. **`state.rs`** — `jwt_secret`, `access_token_expiry_minutes`, `refresh_token_expiry_days` フィールド追加、`new()` シグネチャ変更
-20. **`auth.rs`** — `Claims`, `create_token`（`expiry_minutes`）, `validate_token`, `FromRequestParts` 実装
-21. **`routes/auth.rs`** — `register`, `login`, `refresh`, `logout` ハンドラー実装
-22. **`routes/mod.rs`** — `pub mod auth;` 追加
-23. **`routes/users.rs`** — `create_user` 削除、認可チェック追加（`claims.sub == user_id`）、明示的カラム指定（`SELECT id, username, email`）
-24. **`main.rs`** — `mod auth;`, JWT_SECRET 読み込み, `POST /users` 削除, `auth/refresh` + `auth/logout` ルート追加, CORS に `allow_headers` 追加
+### Phase 2: ユーザー CRUD
 
-### Phase 3: セキュリティ強化
+8. **Supabase SQL** — `CREATE TABLE users (id BIGINT PRIMARY KEY, username TEXT NOT NULL, email TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now())`
+9. **`models/user.rs`** + **`models/mod.rs`** — `User`（`FromRow`）, `PublicUser`, `UpdateUser` を定義
+10. **`state.rs`** — `AppState` を作る（`PgPool` + `Arc<Mutex<SnowflakeGenerator>>`）
+11. **`lib.rs`** — ライブラリクレートのモジュール宣言（`pub mod db; pub mod errors;` 等）
+12. **`routes/users.rs`** + **`routes/mod.rs`** — `list_users`（カーソルページネーション）, `get_user`, `update_user`, `delete_user` を実装。`PublicUser` を返し、`SELECT id, username` のみ取得
+13. **`config.rs`** — `Config::from_env()` で `DATABASE_URL`, `SNOWFLAKE_MACHINE_ID` を読み込む
+14. **`main.rs`** — `Config` → DB 接続 → `AppState` → `Router` → `axum::serve` でつなげる。tracing 初期化、`CorsLayer`、`TraceLayer` を設定
 
-25. **`Cargo.toml`** — `tower_governor` 0.8 を追加
-26. **`routes/auth.rs`** — `login` でリフレッシュトークン発行前に既存トークンを全削除
-27. **`main.rs`** — `GovernorConfigBuilder` で `per_second: 1, burst_size: 5` を設定 → 認証ルートにのみ `GovernorLayer` を適用 → `axum::serve` を `into_make_service_with_connect_info::<SocketAddr>()` に変更
+### Phase 3: JWT 認証 + 認可 + リフレッシュトークン
 
-### Phase 4: セキュリティ強化（実装済み）
+15. **`Cargo.toml`** — `jsonwebtoken`, `bcrypt`, `chrono`, `uuid`, `sha2`, `hmac`, `hex` を追加。`sqlx` の features に `chrono` を追加
+16. **`.env`** — `JWT_SECRET`（32文字以上）, `JWT_ISSUER`, `JWT_AUDIENCE`, `JWT_LEEWAY_SECONDS`, `ACCESS_TOKEN_EXPIRY_MINUTES`, `REFRESH_TOKEN_EXPIRY_DAYS`, `REFRESH_TOKEN_PEPPER` を追加
+17. **`config.rs`** — 追加した環境変数を `Config` に追加（`JWT_LEEWAY_SECONDS` はオプション、既定60）
+18. **Supabase SQL** — `ALTER TABLE users ADD COLUMN password_hash TEXT NOT NULL DEFAULT '';` + `CREATE TABLE refresh_tokens (...)` + `CREATE UNIQUE INDEX users_email_lower_key ON users (lower(email))`
+19. **`models/user.rs`** — `User.password_hash` に `#[serde(skip_serializing)]` + `#[sqlx(default)]` を追加。`User.email` にも `#[serde(skip_serializing)]` を追加
+20. **`models/auth.rs`** + **`models/mod.rs`** — `RegisterUser`, `LoginUser`, `AuthResponse`, `RefreshRequest`, `LogoutRequest`, `RefreshToken` を定義
+21. **`errors.rs`** — `Unauthorized`, `Forbidden`, `Conflict(String)` バリアントを追加、`#[derive(Debug)]` を付与。テスト: 新バリアントのステータスコード・JSON ボディ
+22. **`validation.rs`** — `validate_password`, `normalize_email` を追加。テスト: password 境界値、normalize_email の trim+lowercase
+23. **`auth.rs`** — `Claims`, `create_token`（`iss`/`aud`/`iat`/`exp` 付き）, `validate_token`（HS256 のみ・必須 claim・`iat` 未来チェック）, `impl FromRequestParts<AppState> for Claims`。テスト: 往復・不正シークレット・期限切れ・issuer/audience 不一致・`iat` チェック
+24. **`state.rs`** — JWT 関連フィールド（`jwt_secret`, `jwt_issuer`, `jwt_audience`, `jwt_leeway_seconds`, `access_token_expiry_minutes`, `refresh_token_expiry_days`, `refresh_token_pepper`, `dummy_password_hash`）を追加
+25. **`routes/auth.rs`** — `hash_refresh_token`（HMAC-SHA256）, `map_unique_violation_to_conflict`, `issue_refresh_token`, `register`, `login`（タイミング差対策 + email 正規化）, `refresh`, `logout` を実装。テスト: pepper 依存性、制約判定
+26. **`routes/users.rs`** — 認可チェック追加（`claims.sub == user_id`）、`update_user` に email 正規化 + UNIQUE 違反 409 マッピング
+27. **`main.rs`** — `Config` の全フィールド対応、`dummy_password_hash` 生成、認証ルート追加、`CORS` に `allow_headers` 追加
 
-29. **リフレッシュトークンのハッシュ保存** — `HMAC-SHA256` + `REFRESH_TOKEN_PEPPER` でハッシュ化して DB に保存。`refresh` / `logout` はハッシュ照合で動作する
-30. **email 正規化** — `normalize_email` (`trim` + `lowercase`) でアプリ側を統一し、DB 側は `unique(lower(email))` で case-insensitive な一意制約を適用
-31. **login のタイミング差対策** — ユーザー不在時もダミー bcrypt ハッシュに対して `verify` を実行し、レスポンス時間の差を軽減
-32. **JWT 検証の追加強化** — `iss` / `aud` 必須化、HS256 のみ許可、`iat` の未来チェック（leeway 超過で拒否）、`JWT_SECRET` の最小長チェック（32文字）
-33. **レート制限 IP モード** — `RATE_LIMIT_IP_MODE` で `peer`（既定）/ `smart` を切替。`peer` はヘッダーを一切信頼しない
-34. **UNIQUE 違反の 409 マッピング** — `register` / `update_user` で email の UNIQUE 違反を `409 Conflict` に変換
-35. **リクエストID** — `SetRequestIdLayer` で全リクエストに UUID v4 の `x-request-id` を付与
+### Phase 4: ミドルウェア + セキュリティ強化
+
+28. **`Cargo.toml`** — `tower_governor`, `tower-helmet` を追加。`tower-http` に `compression-gzip`, `timeout`, `normalize-path`, `request-id` features を追加
+29. **`.env`** — `RATE_LIMIT_IP_MODE`（オプション、既定 `peer`）を追加
+30. **`config.rs`** — `rate_limit_ip_mode` を `Config` に追加
+31. **`rate_limit.rs`** — `RateLimitIpMode`（`Peer`/`Smart`）と `RateLimitIpKeyExtractor` を実装。テスト: peer/smart の IP 抽出（ヘッダー有無・フォールバック・エラー）
+32. **`main.rs`** — ミドルウェアを以下の順で `ServiceBuilder` に積む:
+    1. `SetRequestIdLayer` — リクエスト ID 付与（最初に実行される）
+    2. `TraceLayer` — `make_span_with` で `x-request-id` をスパンに記録
+    3. `CorsLayer` — CORS ヘッダー
+    4. `CompressionLayer` — gzip 圧縮
+    5. `DefaultBodyLimit` — ボディサイズ上限 (5MB)
+    6. `TimeoutLayer` — タイムアウト (10秒)
+    7. `HelmetLayer` — セキュリティヘッダー
+33. **`main.rs`** — `GovernorLayer` を認証ルート（1req/s, burst 5）とユーザールート（10req/s, burst 50）に個別適用 → `merge` で合流
+34. **`main.rs`** — `NormalizePathLayer` で `Router` をラップ（末尾スラッシュ正規化）
+35. **`main.rs`** — `axum::serve` を `into_make_service_with_connect_info::<SocketAddr>()` に変更（GovernorLayer の IP 取得に必要）
+36. **`main.rs`** — `with_graceful_shutdown(shutdown_signal())` で Ctrl+C / SIGTERM の graceful shutdown を設定
+
+### Phase 5: ログ + 構造化トレーシング
+
+37. **`routes/auth.rs`** — 重要アクションの INFO ログ（`User registered`, `User logged in`, `Token refreshed`, `User logged out`）、認証失敗の WARN ログ（`Login failed`, `Expired refresh token used`）を追加
+38. **`routes/users.rs`** — `User updated`, `User deleted` の INFO ログを追加
+39. **`auth.rs`** — JWT 検証失敗時の WARN ログ（`Token Validation failed`）
+40. **`errors.rs`** — `ApiError::Internal` 生成時の ERROR ログ（`Internal error: {s}`）
+
+### Phase 6: テスト
+
+41. **ユニットテスト** — Phase 1〜5 の各ステップで RGBC に従いテストを先に書く（DB 不要のロジックのみ）。`cargo test --lib` で全通過を確認
+42. **結合テスト (`tests/api.rs`)** — `TestApp` インフラ構築、Auth 12 テスト + Users 12 テスト。実際の DB に接続して API のエンドツーエンド動作を検証
+43. **CI 対応** — 環境変数未設定時はテストを失敗（スキップではない）させ、見逃しを防ぐ
 
 ---
 
