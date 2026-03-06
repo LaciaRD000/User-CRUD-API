@@ -11,7 +11,7 @@ Rust製のユーザー管理 REST API。Axum + Tokio で構築し、Supabase (Po
 - Serde (JSON serialization)
 - tower-http 0.6 (CORS, tracing middleware)
 - jsonwebtoken 10 (JWT 生成・検証)
-- bcrypt 0.18 (パスワードハッシュ)
+- argon2 0.5 (パスワードハッシュ — Argon2id)
 - chrono 0.4 (日時操作)
 - uuid 1 (リフレッシュトークン生成)
 - Snowflake ID (自前実装)

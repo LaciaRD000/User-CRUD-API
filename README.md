@@ -10,7 +10,7 @@ Rust 製のユーザー管理 REST API。Axum + Tokio で構築し、Supabase (P
 | Tokio | 非同期ランタイム |
 | sqlx 0.8 | PostgreSQL クライアント |
 | jsonwebtoken 10 | JWT 生成・検証 |
-| bcrypt 0.18 | パスワードハッシュ |
+| argon2 0.5 | パスワードハッシュ (Argon2id) |
 | chrono 0.4 | 日時操作 |
 | uuid 1 | リフレッシュトークン生成 |
 | tower 0.5 | ミドルウェア合成 (ServiceBuilder) |

@@ -19,7 +19,7 @@ DESIGN.md の実装ステップに基づくタスク管理。
 ## Phase 2: JWT 認証 + 認可 + リフレッシュトークン (Step 12-24)
 
 - [x] 12. Supabase — `ALTER TABLE users` + `CREATE TABLE refresh_tokens`
-- [x] 13. `Cargo.toml` — jsonwebtoken, bcrypt, chrono, uuid 追加
+- [x] 13. `Cargo.toml` — jsonwebtoken, argon2, chrono, uuid 追加
 - [x] 14. `.env` — `JWT_SECRET`, `ACCESS_TOKEN_EXPIRY_MINUTES`, `REFRESH_TOKEN_EXPIRY_DAYS` 追加
 - [x] 15. `models/user.rs` + `models/auth.rs` — 認証関連構造体を auth.rs に分離, RefreshToken 追加, password_hash に `#[sqlx(default)]`
 - [x] 16. `models/mod.rs` — auth モジュール追加, 再エクスポート更新
@@ -73,12 +73,12 @@ DESIGN.md の実装ステップに基づくタスク管理。
 ## Phase 8: セキュリティ改善（これから）
 
 - [x] 35. email 正規化（`trim` + `lowercase`）とDB側の case-insensitive UNIQUE（`citext` または `unique(lower(email))`）
-- [x] 36. login のタイミング差対策（email不存在でも bcrypt verify を走らせる）
+- [x] 36. login のタイミング差対策（email不存在でも Argon2 verify を走らせる）
 - [x] 37. JWT 検証の追加強化（`JWT_LEEWAY_SECONDS`/必須claim/`JWT_SECRET` 長チェックの明示）
 
 ## Phase 9: 設計と実装の整合（これから）
 
-- [x] 38. `DESIGN.md` — `AppState` のフィールドと環境変数の説明を現行実装に合わせて更新（jwt issuer/audience/leeway、refresh_token_pepper、dummy bcrypt hash 等）
+- [x] 38. `DESIGN.md` — `AppState` のフィールドと環境変数の説明を現行実装に合わせて更新（jwt issuer/audience/leeway、refresh_token_pepper、dummy Argon2 hash 等）
 - [x] 39. `DESIGN.md` — email の一意制約を `unique(lower(email))` 前提に整理（`email UNIQUE` を残すか、削除するか、移行手順を明記）
 
 ## Phase 10: 高リスク項目（これから）
