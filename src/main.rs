@@ -4,7 +4,7 @@ use axum::{
     Router, ServiceExt,
     extract::DefaultBodyLimit,
     http::{
-        Method, StatusCode,
+        HeaderName, Method, StatusCode,
         header::{AUTHORIZATION, CONTENT_TYPE},
     },
     routing::{get, post},
@@ -17,15 +17,17 @@ use tower_http::{
     compression::CompressionLayer,
     cors::{Any, CorsLayer},
     normalize_path::{NormalizePath, NormalizePathLayer},
+    request_id::{MakeRequestUuid, SetRequestIdLayer},
     timeout::TimeoutLayer,
-    trace::TraceLayer,
+    trace::{DefaultOnResponse, TraceLayer},
 };
 use tracing_subscriber::{
     EnvFilter, layer::SubscriberExt, util::SubscriberInitExt,
 };
 use user_api::{
+    config::Config,
     db,
-    rate_limit::{RateLimitIpKeyExtractor, RateLimitIpMode},
+    rate_limit::RateLimitIpKeyExtractor,
     routes::{auth as auth_routes, users},
     state::AppState,
 };
@@ -42,63 +44,25 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let database_url =
-        std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-    let jwt_secret =
-        std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
-    if jwt_secret.len() < 32 {
-        panic!("JWT_SECRET must be at least 32 characters");
-    }
-    let jwt_issuer =
-        std::env::var("JWT_ISSUER").expect("JWT_ISSUER must be set");
-    let jwt_audience =
-        std::env::var("JWT_AUDIENCE").expect("JWT_AUDIENCE must be set");
-    let jwt_leeway_seconds = std::env::var("JWT_LEEWAY_SECONDS")
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(60);
-    let access_token_expiry_minutes =
-        std::env::var("ACCESS_TOKEN_EXPIRY_MINUTES")
-            .expect("ACCESS_TOKEN_EXPIRY_MINUTES must be set")
-            .parse::<u64>()
-            .expect("ACCESS_TOKEN_EXPIRY_MINUTES could not parse u64");
-    let refresh_token_expiry_days = std::env::var("REFRESH_TOKEN_EXPIRY_DAYS")
-        .expect("REFRESH_TOKEN_EXPIRY_DAYS must be set")
-        .parse::<u64>()
-        .expect("REFRESH_TOKEN_EXPIRY_DAYS could not parse u64");
-    let refresh_token_pepper = std::env::var("REFRESH_TOKEN_PEPPER")
-        .expect("REFRESH_TOKEN_PEPPER must be set");
-    let rate_limit_ip_mode = std::env::var("RATE_LIMIT_IP_MODE")
-        .ok()
-        .map(|s| {
-            RateLimitIpMode::parse(&s).unwrap_or_else(|| {
-                panic!(
-                    "RATE_LIMIT_IP_MODE must be one of: peer, smart (got: {s})"
-                )
-            })
-        })
-        .unwrap_or(RateLimitIpMode::Peer);
-    let snowflake_machine_id = std::env::var("SNOWFLAKE_MACHINE_ID")
-        .expect("SNOWFLAKE_MACHINE_ID must be set")
-        .parse::<u16>()
-        .expect("SNOWFLAKE_MACHINE_ID could not parse u16");
+    let config = Config::from_env();
+
     let dummy_password_hash =
         bcrypt::hash("dummy-password-not-a-secret", bcrypt::DEFAULT_COST)
             .expect("Failed to generate dummy bcrypt hash");
-    let pool = db::create_pool(&database_url)
+    let pool = db::create_pool(&config.database_url)
         .await
         .expect("Failed to connect to database");
 
     let state = AppState::new(
         pool,
-        snowflake_machine_id,
-        jwt_secret,
-        jwt_issuer,
-        jwt_audience,
-        jwt_leeway_seconds,
-        access_token_expiry_minutes,
-        refresh_token_expiry_days,
-        refresh_token_pepper,
+        config.snowflake_machine_id,
+        config.jwt_secret,
+        config.jwt_issuer,
+        config.jwt_audience,
+        config.jwt_leeway_seconds,
+        config.access_token_expiry_minutes,
+        config.refresh_token_expiry_days,
+        config.refresh_token_pepper,
         dummy_password_hash,
     );
 
@@ -107,7 +71,7 @@ async fn main() {
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
         .allow_headers([AUTHORIZATION, CONTENT_TYPE]);
 
-    let key_extractor = RateLimitIpKeyExtractor::new(rate_limit_ip_mode);
+    let key_extractor = RateLimitIpKeyExtractor::new(config.rate_limit_ip_mode);
 
     let auth_governor = GovernorConfigBuilder::default()
         .key_extractor(key_extractor)
@@ -140,13 +104,35 @@ async fn main() {
         )
         .layer(GovernorLayer::new(user_governor));
 
+    let x_request_id = HeaderName::from_static("x-request-id");
+
     let app = Router::new()
         .merge(auth_routes)
         .merge(user_routes)
         .with_state(state)
         .layer(
             ServiceBuilder::new()
-                .layer(TraceLayer::new_for_http())
+                .layer(SetRequestIdLayer::new(
+                    x_request_id.clone(),
+                    MakeRequestUuid,
+                ))
+                .layer(
+                    TraceLayer::new_for_http()
+                        .make_span_with(|req: &axum::http::Request<_>| {
+                            let request_id = req
+                                .headers()
+                                .get("x-request-id")
+                                .and_then(|v| v.to_str().ok())
+                                .unwrap_or("-");
+                            tracing::info_span!(
+                                "request",
+                                method = %req.method(),
+                                uri = %req.uri(),
+                                request_id = %request_id,
+                            )
+                        })
+                        .on_response(DefaultOnResponse::new().level(tracing::Level::INFO)),
+                )
                 .layer(cors)
                 .layer(CompressionLayer::new())
                 .layer(DefaultBodyLimit::max(5 * 1024 * 1024))
@@ -163,10 +149,42 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
         .await
         .expect("ポートのバインドに失敗しました");
+
+    tracing::info!("Listening on 0.0.0.0:3000");
+
     axum::serve(
       listener,
       ServiceExt::<axum::http::Request<axum::body::Body>>::into_make_service_with_connect_info::<SocketAddr>(app),
     )
+    .with_graceful_shutdown(shutdown_signal())
     .await
     .expect("サーバーの起動に失敗しました");
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("Failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(
+            tokio::signal::unix::SignalKind::terminate(),
+        )
+        .expect("Failed to install SIGTERM handler")
+        .recv()
+        .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        () = ctrl_c => {},
+        () = terminate => {},
+    }
+
+    tracing::info!("Shutdown signal received, finishing in-flight requests...");
 }
