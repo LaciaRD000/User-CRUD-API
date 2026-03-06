@@ -25,6 +25,13 @@ impl SnowflakeGenerator {
             .expect("System time is before UNIX_EPOCH")
             .as_millis() as u64;
 
+        if timestamp < self.last_timestamp {
+            panic!(
+                "Clock moved backwards: last_timestamp={}, now={}",
+                self.last_timestamp, timestamp
+            );
+        }
+
         if timestamp == self.last_timestamp {
             self.sequence += 1;
 
@@ -91,6 +98,15 @@ mod tests {
             );
             prev = id;
         }
+    }
+
+    #[test]
+    #[should_panic(expected = "Clock moved backwards")]
+    fn generate_panics_on_clock_rollback() {
+        let mut sf = SnowflakeGenerator::new(1);
+        // 未来のタイムスタンプを直接設定して巻き戻りをシミュレート
+        sf.last_timestamp = u64::MAX;
+        sf.generate();
     }
 
     #[test]
