@@ -111,6 +111,8 @@ pub async fn register(
 
     let refresh_token = issue_refresh_token(&state, user_id).await?;
 
+    tracing::info!(user_id = user_id, "User registered");
+
     Ok((
         StatusCode::CREATED,
         Json(AuthResponse {
@@ -145,6 +147,7 @@ pub async fn login(
     let user = match (user, is_valid) {
         (Some(user), true) => user,
         _ => {
+            tracing::warn!(email = %email, "Login failed");
             return Err(ApiError::Unauthorized);
         }
     };
@@ -165,6 +168,8 @@ pub async fn login(
     .map_err(|err| ApiError::Internal(err.to_string()))?;
 
     let refresh_token = issue_refresh_token(&state, user.id).await?;
+
+    tracing::info!(user_id = user.id, "User logged in");
 
     Ok(Json(AuthResponse {
         access_token,
@@ -187,6 +192,7 @@ pub async fn refresh(
     .ok_or(ApiError::Unauthorized)?;
 
     if user.expires_at < Utc::now() {
+        tracing::warn!(user_id = user.user_id, "Expired refresh token used");
         sqlx::query(
             "DELETE FROM refresh_tokens WHERE token_hash = $1 AND user_id = $2",
         )
@@ -217,6 +223,8 @@ pub async fn refresh(
     .map_err(|err| ApiError::Internal(err.to_string()))?;
     let refresh_token = issue_refresh_token(&state, user.user_id).await?;
 
+    tracing::info!(user_id = user.user_id, "Token refreshed");
+
     Ok(Json(AuthResponse {
         access_token,
         refresh_token,
@@ -244,6 +252,8 @@ pub async fn logout(
     .execute(&state.db)
     .await
     .map_err(|err| ApiError::Internal(err.to_string()))?;
+
+    tracing::info!(user_id = user_id, "User logged out");
 
     Ok(StatusCode::NO_CONTENT)
 }

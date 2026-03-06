@@ -132,6 +132,8 @@ pub async fn update_user(
             ApiError::Internal(err.to_string())
         })?;
 
+    tracing::info!(user_id = user_id, "User updated");
+
     Ok(Json(user))
 }
 
@@ -157,6 +159,7 @@ pub async fn delete_user(
     if result.rows_affected() == 0 {
         Err(ApiError::NotFound)
     } else {
+        tracing::info!(user_id = user_id, "User deleted");
         Ok(StatusCode::NO_CONTENT)
     }
 }
