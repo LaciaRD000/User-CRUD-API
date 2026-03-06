@@ -5,6 +5,26 @@ use axum::{
 };
 use serde_json::json;
 
+const USERS_EMAIL_UNIQUE_CONSTRAINT: &str = "users_email_key";
+const USERS_EMAIL_LOWER_UNIQUE_INDEX: &str = "users_email_lower_key";
+
+/// PostgreSQL の UNIQUE 違反（SQLSTATE 23505）から email 制約を検出し、
+/// `ApiError::Conflict` に変換するヘルパー。email 以外の制約では `None` を返す。
+pub fn map_unique_violation_to_conflict(
+    code: Option<&str>,
+    constraint: Option<&str>,
+) -> Option<ApiError> {
+    if code != Some("23505") {
+        return None;
+    }
+    if constraint == Some(USERS_EMAIL_UNIQUE_CONSTRAINT)
+        || constraint == Some(USERS_EMAIL_LOWER_UNIQUE_INDEX)
+    {
+        return Some(ApiError::Conflict("email already exists".into()));
+    }
+    None
+}
+
 #[derive(Debug)]
 pub enum ApiError {
     NotFound,

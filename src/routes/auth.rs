@@ -1,3 +1,7 @@
+use argon2::{
+    Argon2,
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
+};
 use axum::{Json, extract::State, http::StatusCode};
 use chrono::{Duration, Utc};
 use hmac::{Hmac, Mac};
@@ -6,7 +10,7 @@ use uuid::Uuid;
 
 use crate::{
     auth::{Claims, create_token},
-    errors::ApiError,
+    errors::{ApiError, map_unique_violation_to_conflict},
     models::{
         AuthResponse, LoginUser, LogoutRequest, RefreshRequest, RefreshToken,
         RegisterUser, User,
@@ -16,25 +20,6 @@ use crate::{
         normalize_email, validate_email, validate_password, validate_username,
     },
 };
-
-const USERS_EMAIL_UNIQUE_CONSTRAINT: &str = "users_email_key";
-const USERS_EMAIL_LOWER_UNIQUE_INDEX: &str = "users_email_lower_key";
-
-fn map_unique_violation_to_conflict(
-    code: Option<&str>,
-    constraint: Option<&str>,
-) -> Option<ApiError> {
-    // Postgres unique_violation is SQLSTATE 23505.
-    if code != Some("23505") {
-        return None;
-    }
-    if constraint == Some(USERS_EMAIL_UNIQUE_CONSTRAINT)
-        || constraint == Some(USERS_EMAIL_LOWER_UNIQUE_INDEX)
-    {
-        return Some(ApiError::Conflict("email already exists".into()));
-    }
-    None
-}
 
 fn hash_refresh_token(token: &str, pepper: &str) -> Result<String, ApiError> {
     let mut mac = Hmac::<Sha256>::new_from_slice(pepper.as_bytes())
@@ -74,8 +59,16 @@ pub async fn register(
     validate_email(&email).map_err(ApiError::BadRequest)?;
     validate_password(&body.password).map_err(ApiError::BadRequest)?;
 
-    let password_hash = bcrypt::hash(&body.password, bcrypt::DEFAULT_COST)
-        .map_err(|err| ApiError::Internal(err.to_string()))?;
+    let password = body.password.clone();
+    let password_hash = tokio::task::spawn_blocking(move || {
+        let salt = SaltString::generate(&mut OsRng);
+        Argon2::default()
+            .hash_password(password.as_bytes(), &salt)
+            .map(|h| h.to_string())
+    })
+    .await
+    .map_err(|err| ApiError::Internal(err.to_string()))?
+    .map_err(|err| ApiError::Internal(err.to_string()))?;
 
     let user_id = state.snowflake.lock().unwrap().generate();
 
@@ -135,14 +128,20 @@ pub async fn login(
     .await
     .map_err(|err| ApiError::Internal(err.to_string()))?;
 
-    // Always perform a bcrypt verification to reduce timing differences between
-    // "email not found" and "password mismatch".
+    // Always perform an Argon2 verification to reduce timing differences
+    // between "email not found" and "password mismatch".
     let password_hash = user
         .as_ref()
-        .map(|u| u.password_hash.as_str())
-        .unwrap_or(state.dummy_password_hash.as_str());
-    let is_valid = bcrypt::verify(&body.password, password_hash)
-        .map_err(|err| ApiError::Internal(err.to_string()))?;
+        .map(|u| u.password_hash.clone())
+        .unwrap_or_else(|| state.dummy_password_hash.clone());
+    let password = body.password.clone();
+    let is_valid = tokio::task::spawn_blocking(move || {
+        let parsed = PasswordHash::new(&password_hash)?;
+        Argon2::default().verify_password(password.as_bytes(), &parsed)
+    })
+    .await
+    .map_err(|err| ApiError::Internal(err.to_string()))?
+    .is_ok();
 
     let user = match (user, is_valid) {
         (Some(user), true) => user,
@@ -276,14 +275,14 @@ mod tests {
         assert!(matches!(
             map_unique_violation_to_conflict(
                 Some("23505"),
-                Some(USERS_EMAIL_UNIQUE_CONSTRAINT)
+                Some("users_email_key")
             ),
             Some(ApiError::Conflict(_))
         ));
         assert!(matches!(
             map_unique_violation_to_conflict(
                 Some("23505"),
-                Some(USERS_EMAIL_LOWER_UNIQUE_INDEX)
+                Some("users_email_lower_key")
             ),
             Some(ApiError::Conflict(_))
         ));
@@ -297,7 +296,7 @@ mod tests {
         assert!(
             map_unique_violation_to_conflict(
                 Some("99999"),
-                Some(USERS_EMAIL_UNIQUE_CONSTRAINT)
+                Some("users_email_key")
             )
             .is_none()
         );

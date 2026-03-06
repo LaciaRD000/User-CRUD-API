@@ -7,30 +7,11 @@ use serde::Deserialize;
 
 use crate::{
     auth::Claims,
-    errors::ApiError,
+    errors::{ApiError, map_unique_violation_to_conflict},
     models::{PublicUser, UpdateUser},
     state::AppState,
     validation::{normalize_email, validate_email, validate_username},
 };
-
-const USERS_EMAIL_UNIQUE_CONSTRAINT: &str = "users_email_key";
-const USERS_EMAIL_LOWER_UNIQUE_INDEX: &str = "users_email_lower_key";
-
-fn map_unique_violation_to_conflict(
-    code: Option<&str>,
-    constraint: Option<&str>,
-) -> Option<ApiError> {
-    // Postgres unique_violation is SQLSTATE 23505.
-    if code != Some("23505") {
-        return None;
-    }
-    if constraint == Some(USERS_EMAIL_UNIQUE_CONSTRAINT)
-        || constraint == Some(USERS_EMAIL_LOWER_UNIQUE_INDEX)
-    {
-        return Some(ApiError::Conflict("email already exists".into()));
-    }
-    None
-}
 
 #[derive(Deserialize)]
 pub struct UsersPagination {

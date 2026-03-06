@@ -71,9 +71,14 @@ impl TestApp {
         let refresh_token_pepper = require_env("REFRESH_TOKEN_PEPPER");
         let snowflake_machine_id: u16 =
             require_parse_env("SNOWFLAKE_MACHINE_ID");
-        let dummy_password_hash =
-            bcrypt::hash("dummy-password-not-a-secret", bcrypt::DEFAULT_COST)
-                .expect("Failed to generate dummy bcrypt hash in test helper");
+        let dummy_password_hash = {
+            use argon2::password_hash::{PasswordHasher, SaltString, rand_core::OsRng};
+            let salt = SaltString::generate(&mut OsRng);
+            argon2::Argon2::default()
+                .hash_password(b"dummy-password-not-a-secret", &salt)
+                .expect("Failed to generate dummy argon2 hash in test helper")
+                .to_string()
+        };
 
         let pool = db::create_pool(&database_url)
             .await

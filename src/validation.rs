@@ -27,7 +27,7 @@ pub fn validate_password(password: &str) -> Result<(), String> {
         Err("password is empty".to_string())
     } else if password.chars().count() < 8 {
         Err("password is too short".to_string())
-    } else if password.len() > 72 {
+    } else if password.len() > 1024 {
         Err("password is too long".to_string())
     } else {
         Ok(())
@@ -121,15 +121,15 @@ mod tests {
     }
 
     #[test]
-    fn password_73_bytes_is_rejected() {
-        let long = "a".repeat(73);
+    fn password_1025_bytes_is_rejected() {
+        let long = "a".repeat(1025);
         let err = validate_password(&long).unwrap_err();
         assert!(err.contains("long"), "Expected 'long' in error: {err}");
     }
 
     #[test]
-    fn password_72_bytes_is_valid() {
-        let pw = "a".repeat(72);
+    fn password_1024_bytes_is_valid() {
+        let pw = "a".repeat(1024);
         assert!(validate_password(&pw).is_ok());
     }
 }

@@ -46,9 +46,14 @@ async fn main() {
 
     let config = Config::from_env();
 
-    let dummy_password_hash =
-        bcrypt::hash("dummy-password-not-a-secret", bcrypt::DEFAULT_COST)
-            .expect("Failed to generate dummy bcrypt hash");
+    let dummy_password_hash = {
+        use argon2::password_hash::{PasswordHasher, SaltString, rand_core::OsRng};
+        let salt = SaltString::generate(&mut OsRng);
+        argon2::Argon2::default()
+            .hash_password(b"dummy-password-not-a-secret", &salt)
+            .expect("Failed to generate dummy argon2 hash")
+            .to_string()
+    };
     let pool = db::create_pool(&config.database_url)
         .await
         .expect("Failed to connect to database");
@@ -66,10 +71,13 @@ async fn main() {
         dummy_password_hash,
     );
 
+    let x_request_id = HeaderName::from_static("x-request-id");
+
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
-        .allow_headers([AUTHORIZATION, CONTENT_TYPE]);
+        .allow_headers([AUTHORIZATION, CONTENT_TYPE])
+        .expose_headers([x_request_id.clone()]);
 
     let key_extractor = RateLimitIpKeyExtractor::new(config.rate_limit_ip_mode);
 
@@ -104,18 +112,12 @@ async fn main() {
         )
         .layer(GovernorLayer::new(user_governor));
 
-    let x_request_id = HeaderName::from_static("x-request-id");
-
     let app = Router::new()
         .merge(auth_routes)
         .merge(user_routes)
         .with_state(state)
         .layer(
             ServiceBuilder::new()
-                .layer(SetRequestIdLayer::new(
-                    x_request_id.clone(),
-                    MakeRequestUuid,
-                ))
                 .layer(
                     TraceLayer::new_for_http()
                         .make_span_with(|req: &axum::http::Request<_>| {
@@ -140,7 +142,11 @@ async fn main() {
                     StatusCode::REQUEST_TIMEOUT,
                     Duration::from_secs(10),
                 ))
-                .layer(HelmetLayer::with_defaults()),
+                .layer(HelmetLayer::with_defaults())
+                .layer(SetRequestIdLayer::new(
+                    x_request_id.clone(),
+                    MakeRequestUuid,
+                )),
         );
 
     let app: NormalizePath<Router> =
