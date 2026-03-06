@@ -17,6 +17,7 @@ tower-http = { version = "0.6", features = [
   "compression-gzip",
   "timeout",
   "normalize-path",
+  "request-id",
 ] }
 tower-helmet = "0.3.0"
 tracing = "0.1"
